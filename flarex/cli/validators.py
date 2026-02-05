@@ -1,9 +1,8 @@
 from __future__ import annotations
-import ipaddress
 from dataclasses import dataclass
 from typing import List, Optional
 from flarex.core.models import EHName
-
+import ipaddress
 
 @dataclass(frozen=True)
 class Destination:

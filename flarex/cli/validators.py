@@ -1,16 +1,28 @@
 from __future__ import annotations
-from dataclasses import dataclass
-from typing import List, Optional
-from flarex.core.models import EHName
-import ipaddress
 
-@dataclass(frozen=True)
-class Destination:
-    raw: str
-    kind: str
-    value: str
+import ipaddress
+from typing import List, Optional
+
+from flarex.cli.models import EHName, Destination
 
 def parse_destination(dest: str) -> Destination:
+    """
+    Parse destination string into a Destination Object.
+    
+    The destination may be:
+    - A plain IPv6 literal
+    - A bracketed IPv6 literal
+    - A hostname
+    
+    Args:
+        dest: A destination string provided by the user.
+        
+    Returns:
+        A destination object with kind="ipv6" or kind="hostname".
+    
+    Raises:
+        ValueError: If the destination string is empty or invalid.
+    """
     s = dest.strip()
 
     if s.startswith("[") and s.endswith("]"):
@@ -27,6 +39,25 @@ def parse_destination(dest: str) -> Destination:
     return Destination(raw=dest, kind="hostname", value=s)
 
 def parse_eh_spec(spec: Optional[str]) -> Optional[List[EHName]]:
+    """
+    Parse a list of IPv6 extension headers into a list of EHName values
+    
+    The input may be:
+    - None (the user did not provide --eh)
+    - "none" (the user requested for no extension headers)
+    - A comma-seperated chain of extension headers
+    
+    Args:
+        spec: A list of extension headers string provided by the user.
+    
+    Return:
+        - None if the user did not specify --eh.
+        - AN empty list if the user specified "none".
+        - A list of EHName values if a valid header chain was provided
+    
+    Raises:
+        ValueError: If an unknown extension header name is provided.
+    """
     if spec is None:
         return None
     s = spec.strip().lower()

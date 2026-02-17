@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 from dataclasses import dataclass
 from enum import Enum
 from typing import Optional, List
@@ -22,7 +23,7 @@ class OnOff(str, Enum):
     off = "off"
     
 class EHName(str, Enum):
-    hop = "hop"
+    hop = "hop" or "hbh"
     dst = "dst"
     rt = "rt"
     frag = "frag"
@@ -41,6 +42,11 @@ class LocateReport(str, Enum):
     detailed = "detailed"
     json = "json"
 
+@dataclass
+class Destination:
+    raw: str
+    kind: str
+    value: str
 
 @dataclass
 class CommonConfig:

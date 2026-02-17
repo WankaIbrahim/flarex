@@ -3,10 +3,8 @@ from __future__ import annotations
 import typer
 from typing import Optional
 
-from flarex.core.models import CommonConfig, Transport
 from flarex.cli.validators import parse_destination, parse_eh_spec
-#from flarex.output.render import render_result
-from flarex.core.models import OnOff, LocateMethod, LocateReport
+from flarex.cli.models import OnOff, LocateMethod, LocateReport, CommonConfig, Transport
 
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
@@ -57,7 +55,7 @@ def ping(
     df: bool = typer.Option(False, "--df"),
     identify_drop: Optional[OnOff] = typer.Option(None, "--identify-drop"),
 ):
-    cfg = ctx.obj
+    cfg: CommonConfig = ctx.obj
     dest = parse_destination(destination)
 
     #PING Logic

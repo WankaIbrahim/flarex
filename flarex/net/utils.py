@@ -6,6 +6,7 @@ from typing import Any, Optional, List
 from flarex.cli.models import CommonConfig, EHName, Transport, Destination
 
 from scapy.packet import Raw
+from scapy.layers.dns import DNS, DNSQR
 from scapy.layers.inet import UDP, TCP
 from scapy.layers.inet6 import (
     IPv6,
@@ -38,7 +39,7 @@ def resolve_address(dest: Destination) -> str:
     
     return str(infos[0][4][0])
 
-def apply_eh_chain(pkt: Any, cfg: CommonConfig):
+def apply_eh_chain(cfg: CommonConfig, pkt: Any):
     """
     Apply an IPv6 extension header chain to a Scapy IPv6 packet.
     
@@ -129,15 +130,14 @@ def _build_payload(cfg: CommonConfig, override: bytes | None = None) -> bytes:
     return b"\x00" * n
 
 def apply_transport_layer(
-    pkt: Any,
     cfg: CommonConfig,
+    pkt: Any,
     *,
     transport: Optional[Transport] = None,
     payload: bytes | None = None,
+    dest: "Destination | None" = None,
     icmp_id: Optional[int] = None,
     icmp_seq: Optional[int] = None,
-    sport: Optional[int] = None,
-    dport: Optional[int] = None,
     tcp_flags: str = "S",
 ) -> Any:
     """
@@ -151,10 +151,9 @@ def apply_transport_layer(
         cfg: A CommonConfig object.
         transport: Override transport. If None, uses cfg.transport, else defaults to ICMP.
         payload: Optional payload bytes. If None, may be generated from cfg.payload_size.
+        dest: Destination object.
         icmp_id: ICMPv6 Echo identifier.
         icmp_seq: ICMPv6 Echo sequence.
-        sport: Source port for UDP/TCP.
-        dport: Destination port for UDP/TCP.
         tcp_flags: TCP flags string for TCP probes.
 
     Returns:
@@ -166,7 +165,6 @@ def apply_transport_layer(
     data = _build_payload(cfg, override=payload)
     
     t = transport if transport is not None else cfg.transport
-    
     if t is None:
         t = Transport.icmp
 
@@ -180,27 +178,37 @@ def apply_transport_layer(
         pkt = pkt / layer
         return (pkt / Raw(load=data)) if data else pkt
 
-    if t in (Transport.udp, Transport.dns):
-        layer = UDP()
-        if sport is not None:
-            layer.sport = int(sport)
-        if dport is not None:
-            layer.dport = int(dport)
-        pkt = pkt / layer
+    if t == Transport.dns:
+        if dest is None or dest.kind != "hostname":
+            raise ValueError("Transport 'dns' requeires a destination of type hostname")
+        
+        qname = dest.value if dest.kind == "hostname" else "ipv6test.google.com"
+        dns_payload = DNS(rd=1, qd=DNSQR(qname=qname, qtype="AAAA"))
+        return pkt / UDP(dport=53) / dns_payload
+
+    if t == Transport.udp:
+        pkt = pkt / UDP(dport=33434)
         return (pkt / Raw(load=data)) if data else pkt
 
-    if t in (Transport.tcp, Transport.ssh, Transport.http, Transport.https):
-        layer = TCP(flags=tcp_flags)
-        if sport is not None:
-            layer.sport = int(sport)
-        if dport is not None:
-            layer.dport = int(dport)
-        pkt = pkt / layer
+    if t == Transport.tcp:
+        pkt = pkt / TCP(dport=443, flags=tcp_flags)
+        return (pkt / Raw(load=data)) if data else pkt
+
+    if t == Transport.ssh:
+        pkt = pkt / TCP(dport=22, flags=tcp_flags)
+        return (pkt / Raw(load=data)) if data else pkt
+
+    if t == Transport.http:
+        pkt = pkt / TCP(dport=80, flags=tcp_flags)
+        return (pkt / Raw(load=data)) if data else pkt
+
+    if t == Transport.https:
+        pkt = pkt / TCP(dport=443, flags=tcp_flags)
         return (pkt / Raw(load=data)) if data else pkt
 
     raise AssertionError(f"Unhandled transport enum: {t!r}")
     
-def build_ipv6_base(cfg: CommonConfig, dst: str):
+def build_ipv6_base(cfg: CommonConfig, dest: str):
     """
     Build a base IPv6 header using CommonConfig fields.
     
@@ -211,7 +219,7 @@ def build_ipv6_base(cfg: CommonConfig, dst: str):
     Returns:
         A Scapy IPv6 packet with base header fields populated
     """
-    pkt = IPv6(dst=dst)
+    pkt = IPv6(dst=dest)
     
     if getattr(cfg, "src", None):
         pkt.src = cfg.src
@@ -225,82 +233,3 @@ def build_ipv6_base(cfg: CommonConfig, dst: str):
         pkt.fl = int(flowlabel)
         
     return pkt
-
-
-def main() -> None:
-    print("=== utils.py ===")
-    
-    print("\n[1] resolve_address")
-    d_ipv6 = Destination(raw="::1", kind="ipv6", value="::1")
-    print("IPv6 literal ->", resolve_address(d_ipv6))
-
-    d_host = Destination(raw="localhost", kind="hostname", value="localhost")
-    try:
-        print("Hostname ->", resolve_address(d_host))
-    except Exception as e:
-        print("Hostname resolution failed:", repr(e))
-
-    print("\n[2] build_ipv6_base")
-    cfg_base = CommonConfig(hop_limit=64, src=None, flowlabel=12345, payload_size=None,
-                            timeout=None, wait=None, quiet=False, verbose=False, json=False,
-                            eh_auto_order=False, eh_strict=False, eh_chain=None, transport=None)
-    base_pkt = build_ipv6_base(cfg_base, dst="::1")
-    print("Base IPv6 packet:", base_pkt.summary())
-    print("  dst:", base_pkt.dst, "hlim:", base_pkt.hlim, "fl:", base_pkt.fl)
-
-    print("\n[3] apply_eh_chain")
-    cfg_eh = CommonConfig(hop_limit=None, src=None, flowlabel=None, payload_size=None,
-                          timeout=None, wait=None, quiet=False, verbose=False, json=False,
-                          eh_auto_order=True, eh_strict=False,
-                          eh_chain=[EHName.dst, EHName.hop, EHName.frag],
-                          transport=None)
-    eh_pkt = apply_eh_chain(base_pkt, cfg_eh)
-    print("EH-applied packet:", eh_pkt.summary())
-
-    print("\n[4] apply_transport_layer + payload sizing")
-    cfg_payload = CommonConfig(hop_limit=None, src=None, flowlabel=None, payload_size=12,
-                               timeout=None, wait=None, quiet=False, verbose=False, json=False,
-                               eh_auto_order=False, eh_strict=False, eh_chain=None,
-                               transport=Transport.icmp)
-
-    pkt_icmp = apply_transport_layer(
-        build_ipv6_base(cfg_payload, dst="::1"),
-        cfg_payload,
-        transport=Transport.icmp,
-        payload=None,
-        icmp_id=123,
-        icmp_seq=1,
-    )
-    print("ICMP packet:", pkt_icmp.summary())
-    raw_layer = pkt_icmp.getlayer(Raw)
-    print("  Raw payload len:", len(raw_layer.load) if raw_layer else 0)
-
-    pkt_udp = apply_transport_layer(
-        build_ipv6_base(cfg_payload, dst="::1"),
-        cfg_payload,
-        transport=Transport.udp,
-        payload=b"",
-        sport=12345,
-        dport=33434,
-    )
-    print("UDP packet:", pkt_udp.summary())
-    raw_layer = pkt_udp.getlayer(Raw)
-    print("  Raw payload present?", raw_layer is not None)
-
-    pkt_tcp = apply_transport_layer(
-        build_ipv6_base(cfg_payload, dst="::1"),
-        cfg_payload,
-        transport=Transport.tcp,
-        payload=None,
-        sport=40000,
-        dport=443,
-        tcp_flags="S",
-    )
-    print("TCP packet:", pkt_tcp.summary())
-    raw_layer = pkt_tcp.getlayer(Raw)
-    print("  Raw payload len:", len(raw_layer.load) if raw_layer else 0)
-
-    print("\n=== self-test complete ===")
-
-if __name__ == "__main__":
-    main()

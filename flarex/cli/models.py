@@ -23,7 +23,7 @@ class OnOff(str, Enum):
     off = "off"
     
 class EHName(str, Enum):
-    hop = "hop" or "hbh"
+    hop = "hop"
     dst = "dst"
     rt = "rt"
     frag = "frag"

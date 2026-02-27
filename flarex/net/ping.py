@@ -6,7 +6,7 @@ from typing import Optional, Iterator, Dict, Any
 from flarex.cli.models import CommonConfig, Destination, OnOff, Transport
 from flarex.net.utils import resolve_address, build_ipv6_base, apply_eh_chain, apply_transport_layer
 
-from scapy.all import sr1, Packet
+from scapy.all import send, sniff, Packet
 from scapy.layers.inet6 import ICMPv6DestUnreach, ICMPv6TimeExceeded, ICMPv6EchoReply
 from scapy.layers.inet import UDP, TCP
 
@@ -34,7 +34,45 @@ def _interpret_reply(t: Transport, reply: Optional[Packet]):
 
     return "unknown_reply"
 
-#TODO: round ms down, document the new code
+def _send_packet(pkt, *, transport, timeout):
+    if transport == Transport.icmp:
+        filter = f"icmp6 and ip6 src {target} and ip6[40] == 129"
+
+    elif transport == Transport.udp:
+        filter = (
+            f"(ip6 and udp and ip6 src {target}) or "
+            f"(icmp6 and ip6 src {target})"
+        )
+
+    elif transport == Transport.dns:
+        filter = (
+            f"(ip6 and udp and ip6 src {target} and port 53) or "
+            f"(icmp6 and ip6 src {target})"
+        )
+
+    elif transport == Transport.tcp:
+        filter = f"ip6 and tcp and ip6 src {target}"
+
+    elif transport == Transport.ssh:
+        filter = f"ip6 and tcp and ip6 src {target} and port 22"
+
+    elif transport == Transport.http:
+        filter = f"ip6 and tcp and ip6 src {target} and port 80"
+
+    elif transport == Transport.https:
+        filter = f"ip6 and tcp and ip6 src {target} and port 443"
+
+    else:
+        filter = f"ip6 and ip6 src {target}"
+        
+    pkts = sniff(
+        timeout=timeout,
+        filter=filter,
+        started_callback=lambda: send(pkt, verbose=False),
+    )
+    return pkts[-1] if pkts else None
+    
+#TODO: document the new code
 
 def ping(
     cfg: CommonConfig,
@@ -105,7 +143,7 @@ def ping(
         )
         
         start_ms = _now_ms()
-        reply = sr1(pkt, timeout=tmo, verbose=False)
+        reply = _send_packet(pkt, transport=t, timeout=tmo)
         rtt_ms = _now_ms() - start_ms
         
         reply_status = _interpret_reply(t, reply)
@@ -114,7 +152,7 @@ def ping(
         if reply is not None:
             received += 1
             rtts.append(rtt_ms)
-            out_rtt = rtt_ms
+            out_rtt = round(rtt_ms, 3)
         
         yield {
             "type": "probe",
@@ -145,16 +183,31 @@ def ping(
     
 if __name__ == "__main__":
     from scapy.layers.inet6 import IPv6, ICMPv6EchoRequest, IPv6ExtHdrHopByHop
-    from flarex.cli.models import CommonConfig, Destination, Transport
-    from flarex.cli.models import EHName
+    from scapy.all import sniff, send
+    from flarex.cli.models import CommonConfig, Destination, Transport, EHName
+
     
-    pkt = IPv6(dst="google.com") / IPv6ExtHdrHopByHop() / ICMPv6EchoRequest()
-    reply = sr1(pkt, timeout=2, verbose=False)
+    """
+    AAAA Records
+    muerte.ecs --> 2001:630:d0:1002::f003
+    grim.ecs ----> 2001:630:d0:1002::d1e3
+    """
+    target = "2001:630:d0:1002::f003"
+
+    #Individual Packet
+    pkt = IPv6(dst=target) / IPv6ExtHdrHopByHop() / ICMPv6EchoRequest()
+    filter = f"icmp6 and ip6 src {target} and ip6[40] == 129"
+    pkts = sniff(
+        timeout=2,
+        filter=filter,
+        started_callback=lambda: send(pkt, verbose=False),
+    )
+    reply = pkts[-1] if pkts else None
     print(reply)
 
-    target = "google.com"
+    #Ping
     transport = Transport.icmp
-    eh_chain = []
+    eh_chain = [EHName.hop]
     count = 2
     payload_size = 0
 

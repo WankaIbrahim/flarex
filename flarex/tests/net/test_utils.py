@@ -43,7 +43,7 @@ def mk_cfg(
         transport=transport,
     )
 
-
+#TODO: include more comprehensive testing, test all the possible combinations of extension headers
 def test_resolve_address_ipv6():
     dest = Destination(raw="::1", kind="ipv6", value="::1")
     assert resolve_address(dest) == "::1"

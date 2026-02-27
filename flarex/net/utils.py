@@ -39,6 +39,8 @@ def resolve_address(dest: Destination) -> str:
     
     return str(infos[0][4][0])
 
+
+#TODO: set a limit on the number of extension headers that can be chained
 def apply_eh_chain(cfg: CommonConfig, pkt: Any):
     """
     Apply an IPv6 extension header chain to a Scapy IPv6 packet.

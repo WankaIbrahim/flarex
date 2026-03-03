@@ -3,6 +3,17 @@ from __future__ import annotations
 from typing import Dict, Any
 
 def render_ping_stream(event: Dict[str, Any]) -> None:
+    """
+    Render a single ping stream event.
+
+    Consumes the event dictionaries emitted by ``ping_stream`` and prints
+    human-readable output for the start banner, each probe result, and the
+    final summary statistics.
+
+    Args:
+        event: Ping stream event dictionary. Expected ``type`` values are
+            ``start``, ``probe``, and ``summary``.
+    """
     et = event.get("type")
     
     if et == "start":
@@ -47,4 +58,3 @@ def render_ping_stream(event: Dict[str, Any]) -> None:
         print(f"\n--- {raw} ping statistics ---")
         print(f"{sent} packets transmitted, {received} received, {pkt_loss}% packet loss, time {total_time}ms")
         print(f"rtt min/avg/max = {min}/{avg}/{max} ms")
-        

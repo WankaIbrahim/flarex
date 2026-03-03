@@ -25,7 +25,7 @@ def _build_payload(cfg: CommonConfig, default: bytes | None = None) -> bytes:
     Otherwise, returns "default" if provided.
     If neither is set, returns b"".
 
-
+    
     Raises:
         ValueError: If payload_size is negative.
     """
@@ -64,7 +64,6 @@ def resolve_address(dest: Destination) -> str:
     
     return str(infos[0][4][0])
 
-#TODO: set a limit on the number of extension headers that can be chained
 def apply_eh_chain(cfg: CommonConfig, pkt: Any):
     """
     Apply an IPv6 extension header chain to a Scapy IPv6 packet.
@@ -85,17 +84,21 @@ def apply_eh_chain(cfg: CommonConfig, pkt: Any):
         cfg: Common configuration options shared across commands.
     
     Returns:
-        - A Scapy IPv6 packet with extension headers attached to it or 
+        A Scapy IPv6 packet with extension headers attached to it or 
             the input packet if no extension headers were specified
         
     Raises:
-        ValueError: If conflicting flags are provided or if an EH is not implemented
+        ValueError: If more than 3 extension headers are chained togther or
+            if conflicting flags are provided or if an EH is not implemented
     """
     if cfg.eh_chain is None:
         return pkt
     
     if len(cfg.eh_chain) == 0:
         return pkt
+    
+    if len(cfg.eh_chain) > 3:
+        raise ValueError("Cannot chain more than 3 extension headers together")
 
     if cfg.eh_auto_order and cfg.eh_strict:
         raise ValueError("Cannot use --eh-auto-order and --eh-strict together.")

@@ -11,9 +11,25 @@ from scapy.layers.inet6 import ICMPv6DestUnreach, ICMPv6TimeExceeded, ICMPv6Echo
 from scapy.layers.inet import UDP, TCP
 
 def _now_ms() -> float:
+    """
+    Get the current time in milliseconds
+    
+    Returns:
+        The current time in milliseconds
+    """
     return time.perf_counter() * 1000.0
 
 def _interpret_reply(t: Transport, reply: Optional[Packet]):
+    """
+    Looks through a packets layers to determine what the packet is responding to
+    
+    Args:
+        t: The transport protocol used
+        reply: The packet to be interpreted
+        
+    Returns:
+        A string indicating what sort of packet reply is
+    """
     if reply is None:
         return "timeout"
 
@@ -84,8 +100,6 @@ def _send_packet(pkt, *, target, transport, timeout):
 
     rtt_ms = (time.perf_counter_ns() - t0["ns"]) / 1_000_000
     return pkts[0], rtt_ms
-    
-#TODO: document the new code
 
 def ping_stream(
     cfg: CommonConfig,
@@ -98,6 +112,33 @@ def ping_stream(
     pmtu_size: Optional[int] = None,
     identify_drop: Optional[OnOff] = None,
     ) -> Iterator[Dict[str, Any]]:
+    """
+    Stream ping events for a destination.
+
+    Builds and sends one probe per sequence number, yielding structured
+    events for the start of the run, each probe result, and the final
+    summary. The stream is intended to be consumed by a renderer such as
+    ``render_ping_stream``.
+
+    Args:
+        cfg: Common configuration options shared across commands.
+        dest: Destination to probe.
+        count: Number of probes to send. Defaults to 4.
+        interval: Delay in seconds between probes. Defaults to 1.0.
+        per_probe_timeout: Timeout in seconds to wait for each reply.
+            Falls back to ``cfg.timeout`` and then 2.0 seconds.
+        pmtud: Reserved PMTUD toggle. Currently unused.
+        pmtu_size: Reserved PMTU probe size override. Currently unused.
+        identify_drop: Reserved drop identification toggle. Currently unused.
+
+    Yields:
+        Dictionaries describing ping events with ``type`` values of
+        ``start``, ``probe``, and ``summary``.
+
+    Raises:
+        ValueError: If count is less than 1, interval is negative, or the
+            effective timeout is not greater than 0.
+    """
 
     DEFAULT_PAYLOAD = 56    
     

@@ -59,7 +59,6 @@ def ping(
     cfg: CommonConfig = ctx.obj
     dest = parse_destination(destination)
 
-    #PING Logic
     for event in ping_stream(
         cfg,
         dest,

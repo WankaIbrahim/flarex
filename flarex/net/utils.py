@@ -17,6 +17,31 @@ from scapy.layers.inet6 import (
     IPv6ExtHdrFragment,
 )
 
+def _build_payload(cfg: CommonConfig, default: bytes | None = None) -> bytes:
+    """
+    Build a payload bytes object.
+
+    If cfg.payload_size is set, returns that many bytes.
+    Otherwise, returns "default" if provided.
+    If neither is set, returns b"".
+
+
+    Raises:
+        ValueError: If payload_size is negative.
+    """
+    n = getattr(cfg, "payload_size", None)
+
+    if n is not None:
+        n = int(n)
+        if n < 0:
+            raise ValueError("--payload-size must be >= 0")
+        return b"\x00" * n
+
+    if default is not None:
+        return default
+
+    return b""
+
 def resolve_address(dest: Destination) -> str:
     """
     Resolve a destination into a single IPv6 address
@@ -38,7 +63,6 @@ def resolve_address(dest: Destination) -> str:
         raise RuntimeError(f"No IPv6 addresses found for hostname: {dest.value}")
     
     return str(infos[0][4][0])
-
 
 #TODO: set a limit on the number of extension headers that can be chained
 def apply_eh_chain(cfg: CommonConfig, pkt: Any):
@@ -107,30 +131,6 @@ def apply_eh_chain(cfg: CommonConfig, pkt: Any):
     
     return pkt
 
-def _build_payload(cfg: CommonConfig, override: bytes | None = None) -> bytes:
-    """
-    Build a payload bytes object.
-
-    If "override" is provided, it is returned as-is.
-    Otherwise, if cfg.payload_size is set, returns that many bytes.
-    If cfg.payload_size is not set, returns b"".
-
-    Raises:
-        ValueError: If payload_size is negative.
-    """
-    if override is not None:
-        return override
-
-    n = getattr(cfg, "payload_size", None)
-    if n is None:
-        return b""
-
-    n = int(n)
-    if n < 0:
-        raise ValueError("--payload-size must be >= 0")
-
-    return b"\x00" * n
-
 def apply_transport_layer(
     cfg: CommonConfig,
     pkt: Any,
@@ -164,7 +164,7 @@ def apply_transport_layer(
     Raises:
         ValueError: For unsupported or unhandled transports.
     """
-    data = _build_payload(cfg, override=payload)
+    data = _build_payload(cfg, default=payload)
     
     t = transport if transport is not None else cfg.transport
     if t is None:

@@ -34,7 +34,7 @@ def _interpret_reply(t: Transport, reply: Optional[Packet]):
 
     return "unknown_reply"
 
-def _send_packet(pkt, *, transport, timeout):
+def _send_packet(pkt, *, target, transport, timeout):
     if transport == Transport.icmp:
         filter = f"icmp6 and ip6 src {target} and ip6[40] == 129"
 
@@ -64,17 +64,30 @@ def _send_packet(pkt, *, transport, timeout):
 
     else:
         filter = f"ip6 and ip6 src {target}"
-        
+    
+    t0: Dict[str, Optional[int]] = {"ns": None}
+
+    def _on_start():
+        t0["ns"] = time.perf_counter_ns()
+        send(pkt, verbose=False)
+    
     pkts = sniff(
+        count = 1,
         timeout=timeout,
         filter=filter,
-        started_callback=lambda: send(pkt, verbose=False),
+        started_callback=_on_start,
+        store = True
     )
-    return pkts[-1] if pkts else None
+    
+    if not pkts or t0["ns"] is None:
+        return None, None
+
+    rtt_ms = (time.perf_counter_ns() - t0["ns"]) / 1_000_000
+    return pkts[0], rtt_ms
     
 #TODO: document the new code
 
-def ping(
+def ping_stream(
     cfg: CommonConfig,
     dest: Destination,
     *,
@@ -85,6 +98,8 @@ def ping(
     pmtu_size: Optional[int] = None,
     identify_drop: Optional[OnOff] = None,
     ) -> Iterator[Dict[str, Any]]:
+
+    DEFAULT_PAYLOAD = 56    
     
     n = int(count) if count is not None else 4
     gap = float(interval) if interval is not None else 1.0
@@ -110,25 +125,21 @@ def ping(
     
     yield {
         "type": "start",
-        "cmd": "ping",
-        "transport": getattr(t, "value", str(t)),
         "destination": {
             "raw": dest.raw,
             "kind": dest.kind,
             "value": dest.value,
             "resolved": target,
         },
-        "count": n,
-        "interval": gap,
-        "timeout": tmo,
-        "payload_size": getattr(cfg, "payload_size", None),
+        "payload_size": cfg.payload_size if cfg.payload_size is not None else DEFAULT_PAYLOAD,
         "eh_chain": [getattr(e, "value", str(e)) for e in (cfg.eh_chain or [])] if cfg.eh_chain is not None else None,     
     }
-    
+        
     received = 0
     rtts = []
     ident = int(time.time()) & 0xFFFF
 
+    total_start = _now_ms()
     for seq in range(1, n + 1):
         base = build_ipv6_base(cfg, dest=target)
         pkt = apply_eh_chain(cfg, base)
@@ -136,102 +147,55 @@ def ping(
             cfg,
             pkt,
             transport=t,
+            payload=b"\x00" * DEFAULT_PAYLOAD,
             dest=dest,
             icmp_id=ident,
             icmp_seq=seq,
             tcp_flags="S"
         )
         
-        start_ms = _now_ms()
-        reply = _send_packet(pkt, transport=t, timeout=tmo)
-        rtt_ms = _now_ms() - start_ms
+        reply, rtt_ms = _send_packet(pkt, target=target, transport=t, timeout=tmo)
         
         reply_status = _interpret_reply(t, reply)
         
-        out_rtt = None
         if reply is not None:
             received += 1
             rtts.append(rtt_ms)
-            out_rtt = round(rtt_ms, 3)
         
         yield {
             "type": "probe",
-            "seq": seq,
-            "addr": target,
-            "transport": str(t),
             "status": reply_status,
-            "rtt_ms": out_rtt,
+            "reply_size": len(reply) if reply is not None else 0,
+            "destination": {
+                "raw": dest.raw,
+                "kind": dest.kind,
+                "value": dest.value,
+                "resolved": target,
+            },
+            "seq": seq,
+            "rtt_ms": rtt_ms,
         }
         
         if seq != n:
             time.sleep(gap)
-            
+    
+    total_time = int(round(_now_ms() - total_start))
     sent = n
     pkt_loss = (1.0 - (received / sent)) * 100.0 if sent else 0
-    summary = {
+    
+    yield {
+        "type": "summary",
+        "destination": {
+            "raw": dest.raw,
+            "kind": dest.kind,
+            "value": dest.value,
+            "resolved": target,
+        },
         "sent": sent,
         "received": received,
-        "loss_pct": pkt_loss,
-        "min_ms": min(rtts) if rtts else None,
-        "avg_ms": (sum(rtts) / len(rtts)) if rtts else None,
-        "max_ms": max(rtts) if rtts else None,
+        "pkt_loss": int(round(pkt_loss)),
+        "total_time": total_time,
+        "min_ms": round(min(rtts), 2) if rtts else None,
+        "avg_ms": round((sum(rtts) / len(rtts)), 2) if rtts else None,
+        "max_ms": round(max(rtts), 2) if rtts else None,
     }
-
-    yield {"type": "summary", "summary": summary}
-    
-    
-    
-if __name__ == "__main__":
-    from scapy.layers.inet6 import IPv6, ICMPv6EchoRequest, IPv6ExtHdrHopByHop
-    from scapy.all import sniff, send
-    from flarex.cli.models import CommonConfig, Destination, Transport, EHName
-
-    
-    """
-    AAAA Records
-    muerte.ecs --> 2001:630:d0:1002::f003
-    grim.ecs ----> 2001:630:d0:1002::d1e3
-    """
-    target = "2001:630:d0:1002::f003"
-
-    #Individual Packet
-    pkt = IPv6(dst=target) / IPv6ExtHdrHopByHop() / ICMPv6EchoRequest()
-    filter = f"icmp6 and ip6 src {target} and ip6[40] == 129"
-    pkts = sniff(
-        timeout=2,
-        filter=filter,
-        started_callback=lambda: send(pkt, verbose=False),
-    )
-    reply = pkts[-1] if pkts else None
-    print(reply)
-
-    #Ping
-    transport = Transport.icmp
-    eh_chain = [EHName.hop]
-    count = 2
-    payload_size = 0
-
-    cfg = CommonConfig(
-        hop_limit=None,
-        src=None,
-        flowlabel=None,
-        payload_size=payload_size,
-        timeout=2,
-        wait=None,
-        quiet=False,
-        verbose=False,
-        json=False,
-        eh_auto_order=False,
-        eh_strict=False,
-        eh_chain=eh_chain,
-        transport=transport,
-    )
-
-    dest = Destination(
-        raw=target,
-        kind="hostname" if ":" not in target else "ipv6",
-        value=target,
-    )
-
-    for event in ping(cfg, dest, count=count, interval=1):
-        print(event, end="\n\n")

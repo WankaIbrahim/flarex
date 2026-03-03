@@ -5,6 +5,8 @@ from typing import Optional
 
 from flarex.cli.validators import parse_destination, parse_eh_spec
 from flarex.cli.models import OnOff, LocateMethod, LocateReport, CommonConfig, Transport
+from flarex.net.ping import ping_stream
+from flarex.output.render import render_ping_stream
 
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
@@ -52,14 +54,22 @@ def ping(
     per_probe_timeout: Optional[float] = typer.Option(None, "-W", "--per-probe-timeout"),
     pmtud: Optional[OnOff] = typer.Option(None, "--pmtud"),
     pmtu_size: Optional[int] = typer.Option(None, "--pmtu-size"),
-    df: bool = typer.Option(False, "--df"),
     identify_drop: Optional[OnOff] = typer.Option(None, "--identify-drop"),
 ):
     cfg: CommonConfig = ctx.obj
     dest = parse_destination(destination)
 
     #PING Logic
-    #render_result(result, cfg)
+    for event in ping_stream(
+        cfg,
+        dest,
+        count=count,
+        interval=interval,
+        per_probe_timeout=per_probe_timeout,
+        pmtud=pmtud,
+        pmtu_size=pmtu_size,
+        identify_drop=identify_drop):
+        render_ping_stream(event)
 
 
 

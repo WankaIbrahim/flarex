@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import socket
-from typing import Any, Optional, List
+import time
+from typing import Any, Optional, List, Dict
 
 from flarex.cli.models import CommonConfig, EHName, Transport, Destination
 
-from scapy.packet import Raw
+from scapy.all import send, sniff, Packet, Raw
 from scapy.layers.dns import DNS, DNSQR
 from scapy.layers.inet import UDP, TCP
 from scapy.layers.inet6 import (
@@ -15,6 +16,9 @@ from scapy.layers.inet6 import (
     IPv6ExtHdrDestOpt,
     IPv6ExtHdrRouting,
     IPv6ExtHdrFragment,
+    ICMPv6DestUnreach,
+    ICMPv6TimeExceeded,
+    ICMPv6EchoReply
 )
 
 def _build_payload(cfg: CommonConfig, default: bytes | None = None) -> bytes:
@@ -41,6 +45,102 @@ def _build_payload(cfg: CommonConfig, default: bytes | None = None) -> bytes:
         return default
 
     return b""
+
+def now_ms() -> float:
+    """
+    Get the current time in milliseconds
+    
+    Returns:
+        The current time in milliseconds
+    """
+    return time.perf_counter() * 1000.0
+
+def interpret_reply(t: Transport, reply: Optional[Packet]):
+    """
+    Looks through a packets layers to determine what the packet is responding to
+    
+    Args:
+        t: The transport protocol used
+        reply: The packet to be interpreted
+        
+    Returns:
+        A string indicating what sort of packet reply is
+    """
+    if reply is None:
+        return "timeout"
+
+    if reply.haslayer(ICMPv6EchoReply):
+        return "icmp_reply"
+
+    if reply.haslayer(ICMPv6TimeExceeded):
+        return "icmp_time_exceeded"
+
+    if reply.haslayer(ICMPv6DestUnreach):
+        return "icmp_dest_unreach"
+    
+    if reply.haslayer(TCP):
+        return "tcp_reply"
+
+    if reply.haslayer(UDP):
+        return "udp_reply"
+
+    return "unknown_reply"
+
+def send_packet(pkt, *, target, transport, timeout, is_traceroute: bool = False):
+    icmp_filter = "icmp6" if is_traceroute else f"icmp6 and ip6 src {target}"
+
+    if transport == Transport.icmp:
+        if is_traceroute:
+            filter = f"(icmp6 and ip6 src {target} and ip6[40] == 129) or (icmp6 and ip6[40] == 3)"
+        else:
+            filter = f"icmp6 and ip6 src {target} and ip6[40] == 129"
+
+    elif transport == Transport.udp:
+        filter = (
+            f"(ip6 and udp and ip6 src {target}) or "
+            f"{icmp_filter}"
+        )
+
+    elif transport == Transport.dns:
+        filter = (
+            f"(ip6 and udp and ip6 src {target} and port 53) or "
+            f"{icmp_filter}"
+        )
+
+    elif transport in (Transport.tcp, Transport.ssh, Transport.http, Transport.https):
+        port = {
+            Transport.tcp: 443,
+            Transport.ssh: 22,
+            Transport.http: 80,
+            Transport.https: 443,
+        }[transport]
+        filter = (
+            f"(ip6 and tcp and ip6 src {target} and port {port}) or "
+            f"{icmp_filter}"
+        )
+
+    else:
+        filter = f"(ip6 and ip6 src {target}) or {icmp_filter}"
+
+    t0: Dict[str, Optional[int]] = {"ns": None}
+
+    def _on_start():
+        t0["ns"] = time.perf_counter_ns()
+        send(pkt, verbose=False)
+
+    pkts = sniff(
+        count=1,
+        timeout=timeout,
+        filter=filter,
+        started_callback=_on_start,
+        store=True,
+    )
+
+    if not pkts or t0["ns"] is None:
+        return None, None
+
+    rtt_ms = (time.perf_counter_ns() - t0["ns"]) / 1_000_000
+    return pkts[0], rtt_ms
 
 def resolve_address(dest: Destination) -> str:
     """
@@ -213,7 +313,7 @@ def apply_transport_layer(
 
     raise AssertionError(f"Unhandled transport enum: {t!r}")
     
-def build_ipv6_base(cfg: CommonConfig, dest: str):
+def build_ipv6_base(cfg: CommonConfig, dest: str, *, hop_limit: int | None = None):
     """
     Build a base IPv6 header using CommonConfig fields.
     
@@ -224,13 +324,13 @@ def build_ipv6_base(cfg: CommonConfig, dest: str):
     Returns:
         A Scapy IPv6 packet with base header fields populated
     """
-    pkt = IPv6(dst=dest)
+    pkt = IPv6(dst=dest, hlim=hop_limit if hop_limit is not None else 64)
     
     if getattr(cfg, "src", None):
         pkt.src = cfg.src
     
     hlim = getattr(cfg, "hop_limit", None)
-    if hlim is not None:
+    if hlim is not None and hop_limit is None:
         pkt.hlim = int(hlim)
     
     flowlabel = getattr(cfg, "flowlabel", None)

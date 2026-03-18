@@ -96,10 +96,13 @@ def send_packet(pkt, *, target, transport, timeout, is_traceroute: bool = False)
             filter = f"icmp6 and ip6 src {target} and ip6[40] == 129"
 
     elif transport == Transport.udp:
-        filter = (
-            f"(ip6 and udp and ip6 src {target}) or "
-            f"{icmp_filter}"
-        )
+        if is_traceroute:
+            filter = icmp_filter
+        else:
+            filter = (
+                f"(ip6 and udp and ip6 src {target}) or "
+                f"{icmp_filter}"
+            )
 
     elif transport == Transport.dns:
         filter = (

@@ -103,20 +103,20 @@ def traceroute(
             
             if wait_probe > 0 and i < probes:
                 time.sleep(wait_probe)
-            
-            if hop_source is not None:
-                parsed_source = parse_destination(hop_source)
-                resolved_source = resolve_address(parsed_source) if not no_dns else hop_source
-                source_info = {
-                    "raw": parsed_source.raw,
-                    "resolved": resolved_source,
-                }
-            else:
-                source_info = {
-                    "raw": None,
-                    "resolved": None,
-                }
-        
+
+        if hop_source is not None:
+            parsed_source = parse_destination(hop_source)
+            resolved_source = resolve_address(parsed_source) if not no_dns else hop_source
+            source_info = {
+                "raw": parsed_source.raw,
+                "resolved": resolved_source,
+            }
+        else:
+            source_info = {
+                "raw": None,
+                "resolved": None,
+            }
+
         yield {
             "type": "hop",
             "hop": hop,

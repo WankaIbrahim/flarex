@@ -41,10 +41,10 @@ def render_ping_stream(event: Dict[str, Any]) -> None:
         seq = event.get("seq")
         time = event.get("rtt_ms")
         
-        if status is not None:
-            print(f"{size} bytes from {raw} ({resolved}): seq={seq} time={time} ms")
+        if status == "timeout":
+            print(f"Request timeout for icmp_seq {seq}")
         else:
-            print(f"None")
+            print(f"{size} bytes from {raw} ({resolved}): seq={seq} time={time:.3f} ms")
             
     elif et == "summary":
         sent = event.get("sent")

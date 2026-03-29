@@ -6,7 +6,7 @@ from typing import Optional, Iterator, Dict, Any
 from flarex.cli.models import CommonConfig, Destination, OnOff, Transport
 from flarex.net.utils import *
 
-def ping_stream(
+def ping(
     cfg: CommonConfig,
     dest: Destination,
     *,
@@ -15,7 +15,6 @@ def ping_stream(
     per_probe_timeout: Optional[float] = None,
     pmtud: Optional[OnOff] = None,
     pmtu_size: Optional[int] = None,
-    identify_drop: Optional[OnOff] = None,
     ) -> Iterator[Dict[str, Any]]:
     """
     Stream ping events for a destination.
@@ -32,9 +31,13 @@ def ping_stream(
         interval: Delay in seconds between probes. Defaults to 1.0.
         per_probe_timeout: Timeout in seconds to wait for each reply.
             Falls back to ``cfg.timeout`` and then 2.0 seconds.
-        pmtud: Reserved PMTUD toggle. Currently unused.
-        pmtu_size: Reserved PMTU probe size override. Currently unused.
-        identify_drop: Reserved drop identification toggle. Currently unused.
+        pmtud: When ``OnOff.on``, enables Path MTU Discovery. Probes are
+            sized to ``pmtu_size`` and ICMPv6 Packet Too Big replies are
+            captured; each such reply reduces the probe size for subsequent
+            probes to the advertised MTU.
+        pmtu_size: Initial total probe packet size (IPv6 header + ICMPv6
+            header + payload) when PMTUD is enabled. Defaults to 1500.
+            Must be >= 1280 (IPv6 minimum MTU).
 
     Yields:
         Dictionaries describing ping events with ``type`` values of
@@ -45,8 +48,12 @@ def ping_stream(
             effective timeout is not greater than 0.
     """
 
-    DEFAULT_PAYLOAD = 56    
-    
+    _DEFAULT_PAYLOAD = 56
+    _IPV6_HDR = 40
+    _ICMPV6_ECHO_HDR = 8
+    _DEFAULT_PMTU = 1500
+    _MIN_MTU = 1280
+
     count = int(count) if count is not None else 4
     interval = float(interval) if interval is not None else 1.0
     timeout = float(per_probe_timeout if per_probe_timeout is not None
@@ -59,11 +66,26 @@ def ping_stream(
         raise ValueError("--interval must be >= 0")
     if timeout <= 0:
         raise ValueError("--per-probe-timeout/--timeout must be > 0")
-    
+
+    doing_pmtud = pmtud == OnOff.on
+    if doing_pmtud:
+        if pmtu_size is not None and pmtu_size < _MIN_MTU:
+            raise ValueError(f"--pmtu-size must be >= {_MIN_MTU} (IPv6 minimum MTU)")
+        current_mtu = pmtu_size if pmtu_size is not None else _DEFAULT_PMTU
+        probe_payload = max(0, current_mtu - _IPV6_HDR - _ICMPV6_ECHO_HDR)
+    else:
+        current_mtu = None
+        probe_payload = None
+
     transport = cfg.transport or Transport.icmp
     
     target = resolve_address(dest)
     
+    start_payload_size = (
+        probe_payload if doing_pmtud
+        else cfg.payload_size if cfg.payload_size is not None
+        else _DEFAULT_PAYLOAD
+    )
     yield {
         "type": "start",
         "destination": {
@@ -72,8 +94,10 @@ def ping_stream(
             "value": dest.value,
             "resolved": target,
         },
-        "payload_size": cfg.payload_size if cfg.payload_size is not None else DEFAULT_PAYLOAD,
-        "eh_chain": [getattr(e, "value", str(e)) for e in (cfg.eh_chain or [])] if cfg.eh_chain is not None else None,     
+        "payload_size": start_payload_size,
+        "pmtud": pmtud.value if pmtud is not None else None,
+        "pmtu_size": current_mtu,
+        "eh_chain": [getattr(e, "value", str(e)) for e in (cfg.eh_chain or [])] if cfg.eh_chain is not None else None,
     }
         
     received = 0
@@ -84,23 +108,35 @@ def ping_stream(
     for seq in range(1, count + 1):
         base = build_ipv6_base(cfg, dest=target)
         pkt = apply_eh_chain(cfg, base)
+        force_payload = b"\x00" * probe_payload if probe_payload is not None else None
         pkt = apply_transport_layer(
             cfg,
             pkt,
             transport=transport,
-            payload=b"\x00" * DEFAULT_PAYLOAD,
+            payload=b"\x00" * _DEFAULT_PAYLOAD,
             dest=dest,
             icmp_id=ident,
             icmp_seq=seq,
-            tcp_flags="S"
+            tcp_flags="S",
+            force_payload=force_payload,
         )
-        reply, rtt_ms = send_packet(pkt, target=target, transport=transport, timeout=timeout)
+        reply, rtt_ms = send_packet(pkt, target=target, transport=transport, timeout=timeout, pmtud=doing_pmtud)
         reply_status = interpret_reply(transport, reply)
-        
-        if reply_status != "timeout" and reply is not None:
+
+        discovered_mtu = None
+        reply_src = None
+        if reply_status == "icmp_packet_too_big" and reply is not None:
+            discovered_mtu = int(reply[ICMPv6PacketTooBig].mtu)
+            if doing_pmtud:
+                current_mtu = max(discovered_mtu, _MIN_MTU)
+                probe_payload = max(0, current_mtu - _IPV6_HDR - _ICMPV6_ECHO_HDR)
+            if reply.haslayer(IPv6):
+                reply_src = reply[IPv6].src
+
+        if reply_status not in ("timeout", "icmp_packet_too_big") and reply is not None:
             received += 1
             rtts.append(rtt_ms)
-        
+
         yield {
             "type": "probe",
             "status": reply_status,
@@ -113,8 +149,10 @@ def ping_stream(
             },
             "seq": seq,
             "rtt_ms": rtt_ms,
+            "pmtu": discovered_mtu,
+            "reply_src": reply_src,
         }
-        
+
         if seq != count:
             time.sleep(interval)
     

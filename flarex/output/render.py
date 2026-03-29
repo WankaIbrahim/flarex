@@ -21,15 +21,20 @@ def render_ping_stream(event: Dict[str, Any]) -> None:
         raw = dest.get("raw") or dest.get("value") or "?"
         resolved = dest.get("resolved") or "?"
         payload_size = event.get("payload_size")
+        pmtud = event.get("pmtud")
+        pmtu_size = event.get("pmtu_size")
 
-        eh = event.get("eh_chain") 
+        eh = event.get("eh_chain")
         eh_str = f" [eh={'/'.join(eh)}]" if eh else None
 
         out_str = f"FLAREX PING {raw}({resolved}), {payload_size} data bytes"
-        
+
+        if pmtud == "on":
+            out_str += f", pmtud=on (probe size={pmtu_size} bytes)"
+
         if eh_str is not None:
             out_str += f", eh_chain: {eh_str}"
-        
+
         print(out_str)
             
     elif et == "probe":
@@ -39,12 +44,16 @@ def render_ping_stream(event: Dict[str, Any]) -> None:
         raw = dest.get("raw") or dest.get("value") or "?"
         resolved = dest.get("resolved") or "?"
         seq = event.get("seq")
-        time = event.get("rtt_ms")
-        
+        rtt = event.get("rtt_ms")
+
         if status == "timeout":
             print(f"Request timeout for icmp_seq {seq}")
+        elif status == "icmp_packet_too_big":
+            pmtu = event.get("pmtu")
+            router = event.get("reply_src") or "?"
+            print(f"Packet Too Big from {router}: seq={seq} mtu={pmtu}")
         else:
-            print(f"{size} bytes from {raw} ({resolved}): seq={seq} time={time:.3f} ms")
+            print(f"{size} bytes from {raw} ({resolved}): seq={seq} time={rtt:.3f} ms")
             
     elif et == "summary":
         sent = event.get("sent")
@@ -113,4 +122,54 @@ def render_traceroute(event: Dict[str, Any]) -> None:
             print("Traceroute complete (routing loop detected).")
         else:
             print("Traceroute complete (max hops reached).")
-    
+
+def render_diagnose(event: Dict[str, Any]) -> None:
+    """
+    Render a single diagnose stream event.
+
+    Consumes the event dictionaries emitted by ``diagnose`` and prints
+    human-readable output for each phase: the start banner, ping results,
+    traceroute hops, per-TTL probe outcomes, and the final filtering result.
+
+    Args:
+        event: Diagnose stream event dictionary. Expected ``type`` values are
+            ``start``, ``ping_result``, ``trace_hop``, ``probe``, ``result``,
+            and ``done``.
+    """
+    et = event.get("type")
+
+    if et == "start":
+        dest = event.get("destination") or {}
+        raw = dest.get("raw") or dest.get("value") or "?"
+        resolved = dest.get("resolved") or "?"
+        method = event.get("method") or "?"
+        transport = event.get("transport") or "?"
+        print(f"FLAREX DIAGNOSE {raw}({resolved}), method={method}, transport={transport}")
+
+    elif et == "ping_result":
+        render_ping_stream(event.get("event") or {})
+
+    elif et == "trace_hop":
+        render_traceroute({**event, "type": "hop"})
+
+    elif et == "probe":
+        ttl = event.get("ttl")
+        hop = event.get("hop") or "*"
+        baseline = "ok" if event.get("baseline") else "drop"
+        test = "ok" if event.get("test") else "drop"
+        tag = " [confirm]" if event.get("confirmation") else ""
+        print(f"  TTL {ttl:>2}  {hop}  baseline={baseline}  test={test}{tag}")
+
+    elif et == "result":
+        filtering_hop = event.get("filtered_hop")
+        reason = event.get("reason")
+        if reason == "no_loss":
+            print("\nResult: no packet loss detected — destination reachable with EH chain.")
+        elif filtering_hop:
+            method = event.get("method") or "?"
+            print(f"\nResult [{method}]: filtering hop identified — {filtering_hop}")
+        else:
+            print("\nResult: no filtering hop identified.")
+
+    elif et == "done":
+        print("Diagnose complete.")

@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import os
+import sys
 import typer
 from typing import Optional
 
 from flarex.cli.validators import parse_destination, parse_eh_spec
-from flarex.cli.models import OnOff, LocateMethod, LocateReport, CommonConfig, Transport
-from flarex.net.ping import ping_stream
+from flarex.cli.models import OnOff, DiagnoseMethod, CommonConfig, Transport
+from flarex.net.ping import ping as _ping
 from flarex.net.traceroute import traceroute
-from flarex.output.render import render_ping_stream, render_traceroute
+from flarex.net.diagnose import diagnose as _diagnose
+from flarex.output.render import render_ping_stream, render_traceroute, render_diagnose
 
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
@@ -29,6 +32,10 @@ def main(
     eh_strict: bool = typer.Option(False, "--eh-strict"),
     transport: Optional[Transport] = typer.Option(None, "-T", "--transport"),
 ):
+    if os.geteuid() != 0:
+        print("flarex requires root privileges to send raw packets. Re-run with sudo.", file=sys.stderr)
+        raise typer.Exit(code=1)
+
     cfg = CommonConfig(
     hop_limit=hop_limit,
     src=src,
@@ -55,20 +62,18 @@ def ping(
     per_probe_timeout: Optional[float] = typer.Option(None, "-W", "--per-probe-timeout"),
     pmtud: Optional[OnOff] = typer.Option(None, "--pmtud"),
     pmtu_size: Optional[int] = typer.Option(None, "--pmtu-size"),
-    identify_drop: Optional[OnOff] = typer.Option(None, "--identify-drop"),
 ):
     cfg: CommonConfig = ctx.obj
     dest = parse_destination(destination)
 
-    for event in ping_stream(
+    for event in _ping(
         cfg,
         dest,
         count=count,
         interval=interval,
         per_probe_timeout=per_probe_timeout,
         pmtud=pmtud,
-        pmtu_size=pmtu_size,
-        identify_drop=identify_drop):
+        pmtu_size=pmtu_size):
         render_ping_stream(event)
 
 
@@ -83,7 +88,6 @@ def trace(
     wait_probe: Optional[float] = typer.Option(None, "-w", "--wait-probe"),
     loop_threshold: Optional[int] = typer.Option(None, "-l", "--loop-threshold"),
     no_dns: bool = typer.Option(False, "-n", "--no-dns"),
-    identify_drop: Optional[OnOff] = typer.Option(None, "--identify-drop"),
 ):
     cfg = ctx.obj
     dest = parse_destination(destination)
@@ -96,8 +100,7 @@ def trace(
             probes=probes,
             wait_probe=wait_probe,
             loop_threshold=loop_threshold,
-            no_dns=no_dns,
-            identify_drop=identify_drop,):
+            no_dns=no_dns):
             render_traceroute(event)
     except KeyboardInterrupt:
         return
@@ -105,18 +108,18 @@ def trace(
 
 
 @app.command()
-def locate(
+def diagnose(
     ctx: typer.Context,
     destination: str = typer.Argument(...),
-    method: Optional[LocateMethod] = typer.Option(None, "--method"),
-    baseline: Optional[str] = typer.Option(None, "--baseline"),
+    method: Optional[DiagnoseMethod] = typer.Option(None, "--method"),
     max_steps: Optional[int] = typer.Option(None, "--max-steps"),
-    report: Optional[LocateReport] = typer.Option(None, "--report"),
 ):
     cfg = ctx.obj
     dest = parse_destination(destination)
 
-    #LOCATE Logic
-    #render_result(result, cfg)
+    try:
+        for event in _diagnose(cfg, dest, method=method, max_steps=max_steps):
+            render_diagnose(event)
+    except KeyboardInterrupt:
+        return
 
-    

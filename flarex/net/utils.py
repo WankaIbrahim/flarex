@@ -18,7 +18,8 @@ from scapy.layers.inet6 import (
     IPv6ExtHdrFragment,
     ICMPv6DestUnreach,
     ICMPv6TimeExceeded,
-    ICMPv6EchoReply
+    ICMPv6EchoReply,
+    ICMPv6PacketTooBig,
 )
 
 def _build_payload(cfg: CommonConfig, default: bytes | None = None) -> bytes:
@@ -72,6 +73,9 @@ def interpret_reply(t: Transport, reply: Optional[Packet]):
     if reply.haslayer(ICMPv6EchoReply):
         return "icmp_reply"
 
+    if reply.haslayer(ICMPv6PacketTooBig):
+        return "icmp_packet_too_big"
+
     if reply.haslayer(ICMPv6TimeExceeded):
         return "icmp_time_exceeded"
 
@@ -86,7 +90,30 @@ def interpret_reply(t: Transport, reply: Optional[Packet]):
 
     return "unknown_reply"
 
-def send_packet(pkt, *, target, transport, timeout, is_traceroute: bool = False):
+def send_packet(pkt, *, target, transport, timeout, is_traceroute: bool = False, pmtud: bool = False):
+    """
+    Send a single probe packet and return the first matching reply.
+
+    Builds a BPF capture filter tuned to the transport and mode, then fires
+    the packet via Scapy's ``send()`` inside ``sniff()``'s start callback so
+    that the timestamp is recorded atomically with transmission.
+
+    Args:
+        pkt: Assembled Scapy packet ready to send.
+        target: Resolved IPv6 address of the destination (used in filters).
+        transport: Transport protocol; controls which reply packets are accepted.
+        timeout: Maximum seconds to wait for a reply.
+        is_traceroute: When ``True``, relaxes the source filter to accept
+            ICMPv6 Time Exceeded from any router, not just the target.
+        pmtud: When ``True``, appends an additional filter clause to capture
+            ICMPv6 Packet Too Big (type 2) messages from any intermediate
+            router, enabling Path MTU Discovery.
+
+    Returns:
+        A ``(packet, rtt_ms)`` tuple where ``packet`` is the first captured
+        reply and ``rtt_ms`` is the round-trip time in milliseconds. Returns
+        ``(None, None)`` if no reply arrives within ``timeout``.
+    """
     icmp_filter = "icmp6" if is_traceroute else f"icmp6 and ip6 src {target}"
 
     if transport == Transport.icmp:
@@ -124,6 +151,9 @@ def send_packet(pkt, *, target, transport, timeout, is_traceroute: bool = False)
 
     else:
         filter = f"(ip6 and ip6 src {target}) or {icmp_filter}"
+
+    if pmtud:
+        filter += " or (icmp6 and ip6[40] == 2)"
 
     t0: Dict[str, Optional[int]] = {"ns": None}
 
@@ -175,7 +205,7 @@ def apply_eh_chain(cfg: CommonConfig, pkt: Any):
     - Hop-by-hop options (hop, hbh)
     - Destination options (dst)
     - Routing (rt)
-    - Fragementation (frag)
+    - Fragmentation (frag)
     
     Unsupported EHs
     - Authentication (ah)
@@ -191,7 +221,7 @@ def apply_eh_chain(cfg: CommonConfig, pkt: Any):
             the input packet if no extension headers were specified
         
     Raises:
-        ValueError: If more than 3 extension headers are chained togther or
+        ValueError: If more than 3 extension headers are chained together or
             if conflicting flags are provided or if an EH is not implemented
     """
     if cfg.eh_chain is None:
@@ -247,6 +277,7 @@ def apply_transport_layer(
     icmp_id: Optional[int] = None,
     icmp_seq: Optional[int] = None,
     tcp_flags: str = "S",
+    force_payload: bytes | None = None,
 ) -> Any:
     """
     Apply a transport layer to a Scapy IPv6 packet.
@@ -263,6 +294,9 @@ def apply_transport_layer(
         icmp_id: ICMPv6 Echo identifier.
         icmp_seq: ICMPv6 Echo sequence.
         tcp_flags: TCP flags string for TCP probes.
+        force_payload: If provided, used as the exact payload bytes, bypassing
+            both ``payload`` and ``cfg.payload_size``. Used by PMTUD to enforce
+            a specific probe size regardless of user-supplied payload settings.
 
     Returns:
         Packet with transport layer attached.
@@ -270,7 +304,7 @@ def apply_transport_layer(
     Raises:
         ValueError: For unsupported or unhandled transports.
     """
-    data = _build_payload(cfg, default=payload)
+    data = force_payload if force_payload is not None else _build_payload(cfg, default=payload)
     
     t = transport if transport is not None else cfg.transport
     if t is None:
@@ -288,9 +322,9 @@ def apply_transport_layer(
 
     if t == Transport.dns:
         if dest is None or dest.kind != "hostname":
-            raise ValueError("Transport 'dns' requeires a destination of type hostname")
-        
-        qname = dest.value if dest.kind == "hostname" else "ipv6test.google.com"
+            raise ValueError("Transport 'dns' requires a destination of type hostname")
+
+        qname = dest.value
         dns_payload = DNS(rd=1, qd=DNSQR(qname=qname, qtype="AAAA"))
         return pkt / UDP(dport=53) / dns_payload
 
@@ -314,7 +348,7 @@ def apply_transport_layer(
         pkt = pkt / TCP(dport=443, flags=tcp_flags)
         return (pkt / Raw(load=data)) if data else pkt
 
-    raise AssertionError(f"Unhandled transport enum: {t!r}")
+    raise RuntimeError(f"Unhandled transport enum: {t!r}")
     
 def build_ipv6_base(cfg: CommonConfig, dest: str, *, hop_limit: int | None = None):
     """
@@ -322,7 +356,7 @@ def build_ipv6_base(cfg: CommonConfig, dest: str, *, hop_limit: int | None = Non
     
     Args:
         cfg: Common configuration options shared across commands.
-        dst: Destination IPv6 address.
+        dest: Destination IPv6 address string.
     
     Returns:
         A Scapy IPv6 packet with base header fields populated

@@ -17,9 +17,37 @@ def traceroute(
     wait_probe: Optional[float] = None,
     loop_threshold: Optional[int] = None,
     no_dns: bool = False,
-    identify_drop: Optional[OnOff] = None,
     ) -> Iterator[Dict[str, Any]]:
-    
+    """
+    Stream traceroute events for a destination.
+
+    Sends ``probes`` packets at each hop limit from ``first_hop`` to
+    ``max_hop``, yielding a structured event per hop. Stops early if the
+    destination replies or a routing loop is detected. The stream is intended
+    to be consumed by a renderer such as ``render_traceroute``.
+
+    Args:
+        cfg: Common configuration options shared across commands.
+        dest: Destination to probe.
+        first_hop: TTL to start from. Defaults to 1.
+        max_hop: Maximum TTL to probe. Defaults to 30.
+        probes: Number of probes per TTL. Defaults to 3.
+        wait_probe: Delay in seconds between probes at the same TTL.
+            Defaults to 0.
+        loop_threshold: Number of consecutive repeated source addresses
+            before a routing loop is declared. Defaults to 3.
+        no_dns: If ``True``, suppresses DNS resolution of hop addresses and
+            overrides the ``dns`` transport with ``udp``.
+
+    Yields:
+        Dictionaries describing traceroute events with ``type`` values of
+        ``start``, ``hop``, and ``done``.
+
+    Raises:
+        ValueError: If ``first_hop``, ``max_hop``, or ``probes`` is less than
+            1, ``wait_probe`` is negative, or the effective timeout is not
+            greater than 0.
+    """
     DEFAULT_PAYLOAD = 60  
     
     first_hop = int(first_hop) if first_hop is not None else 1

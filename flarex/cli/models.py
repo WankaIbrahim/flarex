@@ -32,15 +32,9 @@ class EHName(str, Enum):
     hbh = "hbh"
     mobility = "mobility"
     
-class LocateMethod(str, Enum):
-    hop_scan = "hop-scan"
-    binary_search = "binary-search"
+class DiagnoseMethod(str, Enum):
     confirm_last = "confirm-last"
-    
-class LocateReport(str, Enum):
-    summary = "summary"
-    detailed = "detailed"
-    json = "json"
+    hop_scan = "hop-scan"
 
 @dataclass
 class Destination:

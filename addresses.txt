@@ -1,0 +1,10 @@
+google.com
+cloudflare.com
+wikipedia.org
+facebook.com
+bbc.co.uk
+netflix.com
+microsoft.com
+yahoo.com
+twitter.com
+akamai.com

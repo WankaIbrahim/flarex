@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from typing import Optional, Iterator, Dict, Any
 
-from flarex.cli.models import CommonConfig, Destination, OnOff, Transport
+from flarex.cli.models import CommonConfig, Destination, Transport
 from flarex.net.utils import *
 from flarex.cli.validators import parse_destination
 
@@ -106,7 +106,6 @@ def traceroute(
             pkt = apply_transport_layer(
                 cfg,
                 pkt,
-                transport=transport,
                 payload=b"\x00" * DEFAULT_PAYLOAD,
                 dest=dest,
                 icmp_id=ident,
@@ -116,7 +115,7 @@ def traceroute(
         
             reply, rtt_ms = send_packet(pkt, target=target, transport=transport, timeout=timeout, is_traceroute=True)
     
-            reply_status = interpret_reply(transport, reply)
+            reply_status = interpret_reply(reply)
             
             if reply_status != "timeout" and reply is not None:
                 rtts.append(rtt_ms)

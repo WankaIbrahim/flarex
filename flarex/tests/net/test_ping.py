@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 import flarex.net.ping as ping
-from flarex.cli.models import CommonConfig, Destination, EHName, OnOff, Transport
+from flarex.cli.models import CommonConfig, Destination, EHName, Transport
 
 
 def mk_cfg(
@@ -24,10 +24,6 @@ def mk_cfg(
         flowlabel=flowlabel,
         payload_size=payload_size,
         timeout=timeout,
-        wait=None,
-        quiet=False,
-        verbose=False,
-        json=False,
         eh_auto_order=eh_auto_order,
         eh_strict=eh_strict,
         eh_chain=eh_chain,
@@ -264,27 +260,27 @@ def test_timeout_falls_back_to_cfg_timeout(monkeypatch):
 
 # PMTUD - start event fields
 
-def test_pmtud_none_start_fields_are_none(monkeypatch):
+def test_pmtud_default_start_fields(monkeypatch):
     _mock_network(monkeypatch)
     start = list(ping.ping(mk_cfg(), DEST, count=1))[0]
-    assert start["pmtud"] is None
+    assert start["pmtud"] is False
     assert start["pmtu_size"] is None
 
 def test_pmtud_off_start_fields(monkeypatch):
     _mock_network(monkeypatch)
-    start = list(ping.ping(mk_cfg(), DEST, count=1, pmtud=OnOff.off))[0]
-    assert start["pmtud"] == "off"
+    start = list(ping.ping(mk_cfg(), DEST, count=1, pmtud=False))[0]
+    assert start["pmtud"] is False
     assert start["pmtu_size"] is None
 
 def test_pmtud_on_start_pmtu_size_defaults_to_1500(monkeypatch):
     _mock_network(monkeypatch)
-    start = list(ping.ping(mk_cfg(), DEST, count=1, pmtud=OnOff.on))[0]
-    assert start["pmtud"] == "on"
+    start = list(ping.ping(mk_cfg(), DEST, count=1, pmtud=True))[0]
+    assert start["pmtud"] is True
     assert start["pmtu_size"] == 1500
 
 def test_pmtud_on_start_pmtu_size_uses_provided_value(monkeypatch):
     _mock_network(monkeypatch)
-    start = list(ping.ping(mk_cfg(), DEST, count=1, pmtud=OnOff.on, pmtu_size=1400))[0]
+    start = list(ping.ping(mk_cfg(), DEST, count=1, pmtud=True, pmtu_size=1400))[0]
     assert start["pmtu_size"] == 1400
 
 
@@ -292,17 +288,17 @@ def test_pmtud_on_start_pmtu_size_uses_provided_value(monkeypatch):
 
 def test_pmtud_on_start_payload_size_derived_from_default_pmtu(monkeypatch):
     _mock_network(monkeypatch)
-    start = list(ping.ping(mk_cfg(), DEST, count=1, pmtud=OnOff.on))[0]
+    start = list(ping.ping(mk_cfg(), DEST, count=1, pmtud=True))[0]
     assert start["payload_size"] == 1500 - 40 - 8  # 1452
 
 def test_pmtud_on_start_payload_size_derived_from_custom_pmtu(monkeypatch):
     _mock_network(monkeypatch)
-    start = list(ping.ping(mk_cfg(), DEST, count=1, pmtud=OnOff.on, pmtu_size=1400))[0]
+    start = list(ping.ping(mk_cfg(), DEST, count=1, pmtud=True, pmtu_size=1400))[0]
     assert start["payload_size"] == 1400 - 40 - 8  # 1352
 
 def test_pmtud_off_start_payload_size_unchanged(monkeypatch):
     _mock_network(monkeypatch)
-    start = list(ping.ping(mk_cfg(), DEST, count=1, pmtud=OnOff.off))[0]
+    start = list(ping.ping(mk_cfg(), DEST, count=1, pmtud=False))[0]
     assert start["payload_size"] == 56
 
 
@@ -312,14 +308,14 @@ def test_pmtud_on_sends_pmtud_true_to_send_packet(monkeypatch):
     _mock_network(monkeypatch)
     flags = []
     monkeypatch.setattr(ping, "send_packet", lambda pkt, **kw: (flags.append(kw.get("pmtud")), (None, None))[-1])
-    list(ping.ping(mk_cfg(), DEST, count=1, pmtud=OnOff.on))
+    list(ping.ping(mk_cfg(), DEST, count=1, pmtud=True))
     assert flags[0] is True
 
 def test_pmtud_off_sends_pmtud_false_to_send_packet(monkeypatch):
     _mock_network(monkeypatch)
     flags = []
     monkeypatch.setattr(ping, "send_packet", lambda pkt, **kw: (flags.append(kw.get("pmtud")), (None, None))[-1])
-    list(ping.ping(mk_cfg(), DEST, count=1, pmtud=OnOff.off))
+    list(ping.ping(mk_cfg(), DEST, count=1, pmtud=False))
     assert flags[0] is False
 
 def test_pmtud_none_sends_pmtud_false_to_send_packet(monkeypatch):
@@ -336,14 +332,14 @@ def test_pmtud_on_force_payload_matches_pmtu_size(monkeypatch):
     _mock_network(monkeypatch)
     payloads = []
     monkeypatch.setattr(ping, "apply_transport_layer", lambda cfg, pkt, **kw: (payloads.append(kw.get("force_payload")), pkt)[-1])
-    list(ping.ping(mk_cfg(), DEST, count=1, pmtud=OnOff.on, pmtu_size=1400))
+    list(ping.ping(mk_cfg(), DEST, count=1, pmtud=True, pmtu_size=1400))
     assert payloads[0] == b"\x00" * (1400 - 40 - 8)
 
 def test_pmtud_off_force_payload_is_none(monkeypatch):
     _mock_network(monkeypatch)
     payloads = []
     monkeypatch.setattr(ping, "apply_transport_layer", lambda cfg, pkt, **kw: (payloads.append(kw.get("force_payload")), pkt)[-1])
-    list(ping.ping(mk_cfg(), DEST, count=1, pmtud=OnOff.off))
+    list(ping.ping(mk_cfg(), DEST, count=1, pmtud=False))
     assert payloads[0] is None
 
 
@@ -386,14 +382,14 @@ def test_normal_probe_reply_src_is_none(monkeypatch):
 def test_ptb_not_counted_as_received(monkeypatch):
     ptb = _FakePTBReply(mtu=1400)
     _mock_network(monkeypatch, replies=[(ptb, 5.0), (ptb, 5.0), (ptb, 5.0)])
-    summary = list(ping.ping(mk_cfg(), DEST, count=3, pmtud=OnOff.on))[-1]
+    summary = list(ping.ping(mk_cfg(), DEST, count=3, pmtud=True))[-1]
     assert summary["received"] == 0
     assert summary["pkt_loss"] == 100
 
 def test_ptb_not_in_rtt_stats(monkeypatch):
     ptb = _FakePTBReply(mtu=1400)
     _mock_network(monkeypatch, replies=[(ptb, 5.0), (ptb, 5.0)])
-    summary = list(ping.ping(mk_cfg(), DEST, count=2, pmtud=OnOff.on))[-1]
+    summary = list(ping.ping(mk_cfg(), DEST, count=2, pmtud=True))[-1]
     assert summary["min_ms"] is None
     assert summary["avg_ms"] is None
     assert summary["max_ms"] is None
@@ -401,7 +397,7 @@ def test_ptb_not_in_rtt_stats(monkeypatch):
 def test_ptb_mixed_with_replies_counts_correctly(monkeypatch):
     replies = [(_FakePTBReply(mtu=1400), 5.0), (_FakeReply(), 10.0), (_FakePTBReply(mtu=1300), 5.0)]
     _mock_network(monkeypatch, replies=replies)
-    summary = list(ping.ping(mk_cfg(), DEST, count=3, pmtud=OnOff.on))[-1]
+    summary = list(ping.ping(mk_cfg(), DEST, count=3, pmtud=True))[-1]
     assert summary["received"] == 1
     assert summary["pkt_loss"] == 67
 
@@ -415,7 +411,7 @@ def test_ptb_reduces_force_payload_for_next_probe(monkeypatch):
     monkeypatch.setattr(ping, "apply_transport_layer", lambda cfg, pkt, **kw: (payloads.append(kw.get("force_payload")), pkt)[-1])
     replies = iter([(ptb, 5.0), (None, None)])
     monkeypatch.setattr(ping, "send_packet", lambda pkt, **kw: next(replies))
-    list(ping.ping(mk_cfg(), DEST, count=2, pmtud=OnOff.on, pmtu_size=1500))
+    list(ping.ping(mk_cfg(), DEST, count=2, pmtud=True, pmtu_size=1500))
     assert payloads[0] == b"\x00" * (1500 - 40 - 8)
     assert payloads[1] == b"\x00" * (1400 - 40 - 8)
 
@@ -426,7 +422,7 @@ def test_ptb_mtu_clamped_to_1280_minimum(monkeypatch):
     monkeypatch.setattr(ping, "apply_transport_layer", lambda cfg, pkt, **kw: (payloads.append(kw.get("force_payload")), pkt)[-1])
     replies = iter([(ptb, 5.0), (None, None)])
     monkeypatch.setattr(ping, "send_packet", lambda pkt, **kw: next(replies))
-    list(ping.ping(mk_cfg(), DEST, count=2, pmtud=OnOff.on, pmtu_size=1500))
+    list(ping.ping(mk_cfg(), DEST, count=2, pmtud=True, pmtu_size=1500))
     assert payloads[1] == b"\x00" * (1280 - 40 - 8)
 
 def test_ptb_without_pmtud_on_does_not_alter_force_payload(monkeypatch):
@@ -446,12 +442,12 @@ def test_ptb_without_pmtud_on_does_not_alter_force_payload(monkeypatch):
 def test_pmtu_size_below_1280_raises_when_pmtud_on(monkeypatch):
     monkeypatch.setattr(ping, "resolve_address", lambda _: "::1")
     with pytest.raises(ValueError, match="1280"):
-        list(ping.ping(mk_cfg(), DEST, count=1, pmtud=OnOff.on, pmtu_size=1279))
+        list(ping.ping(mk_cfg(), DEST, count=1, pmtud=True, pmtu_size=1279))
 
 def test_pmtu_size_at_1280_does_not_raise(monkeypatch):
     _mock_network(monkeypatch)
-    list(ping.ping(mk_cfg(), DEST, count=1, pmtud=OnOff.on, pmtu_size=1280))
+    list(ping.ping(mk_cfg(), DEST, count=1, pmtud=True, pmtu_size=1280))
 
 def test_pmtu_size_below_1280_ignored_when_pmtud_off(monkeypatch):
     _mock_network(monkeypatch)
-    list(ping.ping(mk_cfg(), DEST, count=1, pmtud=OnOff.off, pmtu_size=100))
+    list(ping.ping(mk_cfg(), DEST, count=1, pmtud=False, pmtu_size=100))

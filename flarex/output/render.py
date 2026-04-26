@@ -25,15 +25,14 @@ def render_ping_stream(event: Dict[str, Any]) -> None:
         pmtu_size = event.get("pmtu_size")
 
         eh = event.get("eh_chain")
-        eh_str = f" [eh={'/'.join(eh)}]" if eh else None
 
         out_str = f"FLAREX PING {raw}({resolved}), {payload_size} data bytes"
 
-        if pmtud == "on":
+        if pmtud:
             out_str += f", pmtud=on (probe size={pmtu_size} bytes)"
 
-        if eh_str is not None:
-            out_str += f", eh_chain: {eh_str}"
+        if eh:
+            out_str += f", eh_chain=[{'/'.join(eh)}]"
 
         print(out_str)
             
@@ -47,7 +46,7 @@ def render_ping_stream(event: Dict[str, Any]) -> None:
         rtt = event.get("rtt_ms")
 
         if status == "timeout":
-            print(f"Request timeout for icmp_seq {seq}")
+            print(f"Request timeout: {seq}")
         elif status == "icmp_packet_too_big":
             pmtu = event.get("pmtu")
             router = event.get("reply_src") or "?"
@@ -80,8 +79,7 @@ def render_traceroute(event: Dict[str, Any]) -> None:
         max_hops = event.get("max_hops")
         payload_size = event.get("payload_size")
 
-        eh = event.get("eh_chain") 
-        eh_str = f" [eh={'/'.join(eh)}]" if eh else None
+        eh = event.get("eh_chain")
 
         loop_threshold = event.get("loop_threshold")
         out_str = f"FLAREX TRACEROUTE to {raw}({resolved}), {max_hops} hops max, {payload_size} bytes packets"
@@ -89,9 +87,9 @@ def render_traceroute(event: Dict[str, Any]) -> None:
         if loop_threshold is not None:
             out_str += f", loop threshold: {loop_threshold}"
 
-        if eh_str is not None:
-            out_str += f", eh_chain: {eh_str}"
-        
+        if eh:
+            out_str += f", eh_chain=[{'/'.join(eh)}]"
+
         print(out_str)
         
     elif et == "hop":
@@ -164,10 +162,10 @@ def render_diagnose(event: Dict[str, Any]) -> None:
         filtering_hop = event.get("filtered_hop")
         reason = event.get("reason")
         if reason == "no_loss":
-            print("\nResult: no packet loss detected — destination reachable with EH chain.")
+            print("\nResult: no packet loss detected.")
         elif filtering_hop:
             method = event.get("method") or "?"
-            print(f"\nResult [{method}]: filtering hop identified — {filtering_hop}")
+            print(f"\nResult [{method}]: filtering hop identified - {filtering_hop}")
         else:
             print("\nResult: no filtering hop identified.")
 

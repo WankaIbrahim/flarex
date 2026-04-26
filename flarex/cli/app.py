@@ -1,19 +1,17 @@
 from __future__ import annotations
 
-import os
-import sys
 import typer
 from typing import Optional
 
 from flarex.cli.validators import parse_destination, parse_eh_spec
-from flarex.cli.models import OnOff, DiagnoseMethod, CommonConfig, Transport
+from flarex.cli.models import DiagnoseMethod, CommonConfig, Transport
 from flarex.net.ping import ping as _ping
 from flarex.net.traceroute import traceroute
 from flarex.net.diagnose import diagnose as _diagnose
 from flarex.output.render import render_ping_stream, render_traceroute, render_diagnose
 
 
-app = typer.Typer(add_completion=False, no_args_is_help=True)
+app = typer.Typer(add_completion=False, no_args_is_help=True, pretty_exceptions_enable=False)
 
 @app.callback()
 def main(
@@ -23,36 +21,27 @@ def main(
     flowlabel: Optional[int] = typer.Option(None, "--flowlabel"),
     payload_size: Optional[int] = typer.Option(None, "--payload-size"),
     timeout: Optional[float] = typer.Option(None, "--timeout"),
-    wait: Optional[float] = typer.Option(None, "--wait"),
-    quiet: bool = typer.Option(False, "-q", "--quiet"),
-    verbose: bool = typer.Option(False, "-v", "--verbose"),
-    json: bool = typer.Option(False, "--json"),
     eh: Optional[str] = typer.Option(None, "--eh", help="EH chain like 'hop,dst' or 'none'"),
     eh_auto_order: bool = typer.Option(False, "--eh-auto-order"),
     eh_strict: bool = typer.Option(False, "--eh-strict"),
     transport: Optional[Transport] = typer.Option(None, "-T", "--transport"),
 ):
-    if os.geteuid() != 0:
-        print("flarex requires root privileges to send raw packets. Re-run with sudo.", file=sys.stderr)
-        raise typer.Exit(code=1)
+    
 
     cfg = CommonConfig(
-    hop_limit=hop_limit,
-    src=src,
-    flowlabel=flowlabel,
-    payload_size=payload_size,
-    timeout=timeout,
-    wait=wait,
-    quiet=quiet,
-    verbose=verbose,
-    json=json,
-    eh_auto_order=eh_auto_order,
-    eh_strict=eh_strict,
-    eh_chain=parse_eh_spec(eh),
-    transport=transport,
-)
+        hop_limit=hop_limit,
+        src=src,
+        flowlabel=flowlabel,
+        payload_size=payload_size,
+        timeout=timeout,
+        eh_auto_order=eh_auto_order,
+        eh_strict=eh_strict,
+        eh_chain=parse_eh_spec(eh),
+        transport=transport,
+    )
     ctx.obj = cfg
-    
+
+
 @app.command()
 def ping(
     ctx: typer.Context,
@@ -60,7 +49,7 @@ def ping(
     count: Optional[int] = typer.Option(None, "-c", "--count"),
     interval: Optional[float] = typer.Option(None, "-i", "--interval"),
     per_probe_timeout: Optional[float] = typer.Option(None, "-W", "--per-probe-timeout"),
-    pmtud: Optional[OnOff] = typer.Option(None, "--pmtud"),
+    pmtud: bool = typer.Option(False, "--pmtud/--no-pmtud"),
     pmtu_size: Optional[int] = typer.Option(None, "--pmtu-size"),
 ):
     cfg: CommonConfig = ctx.obj
@@ -76,8 +65,6 @@ def ping(
         pmtu_size=pmtu_size):
         render_ping_stream(event)
 
-
-
 @app.command()
 def trace(
     ctx: typer.Context,
@@ -91,21 +78,17 @@ def trace(
 ):
     cfg = ctx.obj
     dest = parse_destination(destination)
-    try:
-        for event in traceroute(
-            cfg,
-            dest,
-            first_hop=first_hop,
-            max_hop=max_hop,
-            probes=probes,
-            wait_probe=wait_probe,
-            loop_threshold=loop_threshold,
-            no_dns=no_dns):
-            render_traceroute(event)
-    except KeyboardInterrupt:
-        return
-
-
+    
+    for event in traceroute(
+        cfg,
+        dest,
+        first_hop=first_hop,
+        max_hop=max_hop,
+        probes=probes,
+        wait_probe=wait_probe,
+        loop_threshold=loop_threshold,
+        no_dns=no_dns):
+        render_traceroute(event)
 
 @app.command()
 def diagnose(
@@ -117,9 +100,5 @@ def diagnose(
     cfg = ctx.obj
     dest = parse_destination(destination)
 
-    try:
-        for event in _diagnose(cfg, dest, method=method, max_steps=max_steps):
-            render_diagnose(event)
-    except KeyboardInterrupt:
-        return
-
+    for event in _diagnose(cfg, dest, method=method, max_steps=max_steps):
+        render_diagnose(event)

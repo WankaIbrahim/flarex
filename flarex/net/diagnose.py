@@ -23,7 +23,6 @@ def diagnose(
     dest: Destination,
     *,
     method: Optional[DiagnoseMethod] = None,
-    transport: Optional[Transport] = None,
     max_steps: Optional[int] = None,
 ) -> Iterator[Dict[str, Any]]:
     """
@@ -57,8 +56,9 @@ def diagnose(
         ``start``, ``ping_result``, ``trace_hop``, ``probe``, ``result``,
         and ``done``.
     """
+    
     method = method or DiagnoseMethod.confirm_last
-    transport = transport or cfg.transport or Transport.icmp
+    transport = cfg.transport or Transport.icmp
     timeout = float(cfg.timeout) if cfg.timeout is not None else 2.0
     ident = int(time.time()) & 0xFFFF
 
@@ -87,7 +87,7 @@ def diagnose(
         yield {"type": "done"}
         return
 
-    # Traceroute with clean packet (ICMP, no EH) to discover path
+    # Traceroute
     clean_cfg = replace(cfg, transport=Transport.icmp, eh_chain=None)
     hops: List[Optional[str]] = []
     for event in traceroute(clean_cfg, dest):
@@ -170,7 +170,6 @@ def _probe(
     )
     return reply is not None
 
-
 def _hop_count(classified: List[tuple]) -> Dict[str, List[int]]:
     """
     Apply the hop-counting algorithm to a list of classified TTL observations.
@@ -198,7 +197,6 @@ def _hop_count(classified: List[tuple]) -> Dict[str, List[int]]:
         else:
             counts[hop_ip][1] += 1
     return counts
-
 
 def _find_filtering_hop(counts: Dict[str, List[int]]) -> Optional[str]:
     """
@@ -233,7 +231,6 @@ def _find_filtering_hop(counts: Dict[str, List[int]]) -> Optional[str]:
             best_ratio = ratio
             best = hop_ip
     return best
-
 
 def _confirm_last(
     cfg: CommonConfig,
@@ -322,7 +319,6 @@ def _confirm_last(
         "filtered_hop": filtering_hop,
         "ttl": boundary,
     }
-
 
 def _hop_scan(
     cfg: CommonConfig,

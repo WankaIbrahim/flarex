@@ -18,7 +18,7 @@ def parse_destination(dest: str) -> Destination:
         dest: A destination string provided by the user.
         
     Returns:
-        A destination object with kind="ipv6" or kind="hostname".
+        A destination object with kind = "ipv6" or "hostname".
     
     Raises:
         ValueError: If the destination string is empty or invalid.
@@ -52,7 +52,7 @@ def parse_eh_spec(spec: Optional[str]) -> Optional[List[EHName]]:
     
     Return:
         - None if the user did not specify --eh.
-        - AN empty list if the user specified "none".
+        - An empty list if the user specified "none".
         - A list of EHName values if a valid header chain was provided
     
     Raises:

@@ -180,4 +180,4 @@ pyrightconfig.json
 syntax.xhtml
 
 # script.py results
-script/results_*/
+script/results/results_*/

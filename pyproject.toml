@@ -6,3 +6,6 @@ dependencies = ["typer", "rich", "pydantic"]
 
 [project.scripts]
 flarex = "flarex.__main__:main"
+
+[tool.setuptools]
+packages = ["flarex"]

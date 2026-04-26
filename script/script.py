@@ -3,89 +3,188 @@
 script.py
 Usage: sudo python3 script.py [output_dir]
 
-CSV format (no header):  <index>,<hostname>
-
 Phases per target:
-  1. Baseline  — plain ping, TCP
-  2. EH probes — ping + trace for each of: hbh (HBH8), frag (FH512), dst (DO8)
+  1. Baseline  — plain ping to host using icmpv6
+  2. EH probes — ping followed by trace for each of: hbh (HBH8), frag (FH512), dst (DO8)
   3. Diagnose  — flarex diagnose per EH
 """
 
-import csv, os, sys, subprocess, datetime
+import csv
+import os
+import re
+import sys
+import subprocess
+import datetime
 from pathlib import Path
-from dataclasses import dataclass, field
 
-_HERE     = Path(__file__).resolve().parent
-CSV_FILE  = _HERE / "targets.csv"
-FLAREX    = _HERE.parent / ".venv/bin/flarex"
+HERE = Path(__file__).resolve().parent
+CSV_FILE = HERE / "targets_100.csv"
+FLAREX = HERE.parent / ".venv/bin/flarex"
 
-@dataclass
-class Result:
-    index: str
-    host: str
-    baseline: str = "N/A"
-    ping:     dict = field(default_factory=dict)
-    trace:    dict = field(default_factory=dict)
-    diagnose: dict = field(default_factory=dict)
-
-@dataclass
-class EH:
-    name: str
-    rfc_name: str
-    extra_args: list
-
-EH_TYPES = [
-    EH("hbh",  "HBH8",  []),
-    EH("frag", "FH512", ["--payload-size", "512"]),
-    EH("dst",  "DO8",   []),
-]
+EH_TYPES = {
+    "hbh":  ("HBH8",  []),
+    "frag": ("FH512", ["--payload-size", "512"]),
+    "dst":  ("DO8",   []),
+}
 
 
-def run(args: list, out: Path) -> bool:
-    """Run a flarex command, append output to the target file. Returns True on success."""
+def new_result(index, host):
+    return {
+        "index": index,
+        "host": host,
+        "baseline_loss": None,
+        "ping_loss": {},
+        "trace": {},
+        "diagnose": {},
+        "diag_hop": {},
+    }
+
+def run(args, out):
+    """Run a flarex command, append output to file, return stdout (None on error)."""
     cmd = [str(FLAREX)] + args
+    proc = subprocess.run(cmd, capture_output=True, text=True)
     with open(out, "a") as f:
-        f.write(f"\n$ {' '.join(cmd)}\n{'-'*60}\n")
-        f.flush()
-        return subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT).returncode == 0
+        f.write("\n$ " + " ".join(cmd) + "\n")
+        f.write("-" * 60 + "\n")
+        f.write(proc.stdout)
+        if proc.stderr:
+            f.write(proc.stderr)
+    if proc.returncode != 0:
+        return None
+    return proc.stdout
 
+def parse_ping_loss(output):
+    if not output:
+        return None
+    m = re.search(r"(\d+(?:\.\d+)?)%\s+packet loss", output)
+    if m:
+        return float(m.group(1))
+    return None
 
-def parse_csv(path: Path) -> list[tuple[str, str]]:
+def parse_trace(output):
+    if not output:
+        return "N/A"
+    if "routing loop detected" in output:
+        return "LOOP"
+    if "max hops reached" in output:
+        return "MAXHOP"
+    if "Traceroute complete." in output:
+        return "REACH"
+    return "N/A"
+
+def parse_diagnose(output):
+    if not output:
+        return "N/A", None
+    if "no packet loss detected" in output:
+        return "CLEAN", None
+    m = re.search(r"filtering hop identified\s+[—-]\s+(\S+)", output)
+    if m:
+        return "FILT", m.group(1)
+    if "no filtering hop identified" in output:
+        return "LOSS", None
+    return "N/A", None
+
+def parse_csv(path):
+    targets = []
     with open(path, newline="") as f:
-        return [
-            (row[0].strip(), row[1].strip())
-            for row in csv.reader(f)
-            if len(row) >= 2 and not row[0].strip().startswith("#")
-        ]
+        for row in csv.reader(f):
+            if len(row) < 2:
+                continue
+            idx = row[0].strip()
+            host = row[1].strip()
+            if idx.startswith("#"):
+                continue
+            targets.append((idx, host))
+    return targets
+
+def fmt_loss(v):
+    if v is None:
+        return "N/A"
+    return f"{v:g}%"
+
+def sorted_by_count(counts):
+    return sorted(counts.items(), key=lambda x: x[1], reverse=True)
+
+def write_summary(results, out_dir):
+    sep  = "=" * 100
+    dash = "-" * 100
+    col_fmt    = "{:<5} {:<20} {:<6} | {:<6} {:<6} {:<7} {:<6} {:<6} {:<7} {:<6} {:<6} {:<7}"
+    header_fmt = "{:<5} {:<20} {:<6} | {:<20} {:<20} {:<20}"
+
+    lines = []
+    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    lines.append(sep)
+    lines.append(f" flarex EH probe report — {now}")
+    lines.append(sep)
+    lines.append(header_fmt.format("", "", "", "HBH", "FRAG", "DST"))
+    lines.append(col_fmt.format("IDX", "HOST", "BASE",
+                                "ping", "trace", "diag",
+                                "ping", "trace", "diag",
+                                "ping", "trace", "diag"))
+    lines.append(dash)
+
+    for r in results:
+        row = [r["index"], r["host"], fmt_loss(r["baseline_loss"])]
+        for eh in ("hbh", "frag", "dst"):
+            row.append(fmt_loss(r["ping_loss"].get(eh)))
+            row.append(r["trace"].get(eh, "N/A"))
+            row.append(r["diagnose"].get(eh, "N/A"))
+        lines.append(col_fmt.format(*row))
+    lines.append(dash)
 
 
-def write_summary(results: list[Result], out_dir: Path):
-    col  = "{:<5} {:<20} {:<6} | {:<5} {:<6} {:<5} {:<5} {:<6} {:<5} {:<5} {:<6} {:<5}"
-    sep  = "=" * 90
-    dash = "-" * 90
+    eligible = []
+    for r in results:
+        b = r["baseline_loss"]
+        if b is not None and b < 100.0:
+            eligible.append(r)
+    skipped = len(results) - len(eligible)
 
-    def eh_vals(r, eh):
-        return (
-            r.ping.get(eh, "N/A"),
-            "COMPL" if r.trace.get(eh) == "COMPLETE" else "INCOMP" if r.trace.get(eh) == "INCOMPLETE" else "N/A",
-            r.diagnose.get(eh, "N/A"),
-        )
+    lines.append(f" aggregate over {len(eligible)} host(s) with passing baseline"
+                 f" (excluded {skipped}):")
+    for eh in EH_TYPES:
+        losses = []
+        for r in eligible:
+            v = r["ping_loss"].get(eh)
+            if v is not None:
+                losses.append(v)
+        if losses:
+            avg = f"{sum(losses)/len(losses):.1f}%"
+        else:
+            avg = "N/A"
+        lines.append(f"   {eh:<5} mean ping loss = {avg}  (n={len(losses)})")
 
-    lines = [
-        sep,
-        f" flarex EH probe report — {datetime.datetime.now():%Y-%m-%d %H:%M:%S}",
-        sep,
-        "{:<5} {:<20} {:<6} | {:<17} {:<17} {:<17}".format("", "", "", "HBH", "FRAG", "DST"),
-        col.format("IDX", "HOST", "BASE", "ping", "trace", "diag", "ping", "trace", "diag", "ping", "trace", "diag"),
-        dash,
-        *[col.format(r.index, r.host, r.baseline, *eh_vals(r, "hbh"), *eh_vals(r, "frag"), *eh_vals(r, "dst"))
-          for r in results],
-        sep,
-    ]
+    lines.append("")
+    lines.append(" filtering hops by EH:")
+
+    combined = {}
+    for eh in EH_TYPES:
+        counts = {}
+        for r in results:
+            hop = r["diag_hop"].get(eh)
+            if not hop:
+                continue
+            counts[hop] = counts.get(hop, 0) + 1
+            combined[hop] = combined.get(hop, 0) + 1
+
+        if not counts:
+            lines.append(f"   {eh:<5} (none identified)")
+            continue
+        lines.append(f"   {eh}: (total={sum(counts.values())})")
+        for hop, n in sorted_by_count(counts):
+            lines.append(f"     {hop:<40} {n}")
+
+    if combined:
+        lines.append(f"   total: (total={sum(combined.values())})")
+        for hop, n in sorted_by_count(combined):
+            lines.append(f"     {hop:<40} {n}")
+    else:
+        lines.append("   total: (none identified)")
+    lines.append(sep)
+
     text = "\n".join(lines)
     print(text)
     (out_dir / "summary.txt").write_text(text)
-
 
 
 def main():
@@ -94,8 +193,8 @@ def main():
     if not CSV_FILE.exists():
         sys.exit(f"Error: {CSV_FILE} not found.")
 
-    out_dir = Path(sys.argv[1]) if len(sys.argv) > 1 \
-              else Path(f"results_{datetime.datetime.now():%Y%m%d_%H%M%S}")
+    stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    out_dir = Path(f"results/results_{stamp}")
     out_dir.mkdir(parents=True, exist_ok=True)
 
     targets = parse_csv(CSV_FILE)
@@ -107,30 +206,38 @@ def main():
 
     for index, host in targets:
         target_file = out_dir / f"{index}_{host}.txt"
-        r = Result(index=index, host=host)
+        r = new_result(index, host)
         print(f"[{index}] {host}")
 
         # Phase 1 - baseline
-        ok = run(["--transport", "tcp", "ping", host], target_file)
-        r.baseline = "PASS" if ok else "FAIL"
-        print(f"  baseline     -> {r.baseline}")
+        baseline_out = run(["ping", host], target_file)
+        r["baseline_loss"] = parse_ping_loss(baseline_out)
+        print(f"  baseline     -> {fmt_loss(r['baseline_loss'])} packetloss")
 
         # Phase 2 - EH probes
-        for eh in EH_TYPES:
-            base_args = ["--transport", "tcp", "--eh", eh.name] + eh.extra_args
+        for eh_name in EH_TYPES:
+            rfc_name, extra_args = EH_TYPES[eh_name]
+            base_args = ["-T", "tcp", "--eh", eh_name] + extra_args
 
-            ok = run(base_args + ["ping",  host], target_file)
-            r.ping[eh.name] = "PASS" if ok else "DROP"
+            ping_out = run(base_args + ["ping", host], target_file)
+            ping = parse_ping_loss(ping_out)
+            r["ping_loss"][eh_name] = ping
 
-            ok = run(base_args + ["trace", host], target_file)
-            r.trace[eh.name] = "COMPLETE" if ok else "INCOMPLETE"
+            if ping is not None and ping < 100.0:
+                trace_out = run(base_args + ["trace", host], target_file)
+                r["trace"][eh_name] = parse_trace(trace_out)
 
-            print(f"  {eh.rfc_name:<6}  ping={r.ping[eh.name]:<5}  trace={r.trace[eh.name]}")
+            trace_str = r["trace"].get(eh_name, "N/A")
+            print(f"  {rfc_name:<6}  ping={fmt_loss(ping):<6}  trace={trace_str}")
 
         # Phase 3 - diagnose
-        for eh in EH_TYPES:
-            ok = run(["--eh", eh.name] + eh.extra_args + ["diagnose", host], target_file)
-            r.diagnose[eh.name] = "PASS" if ok else "FAIL"
+        for eh_name in EH_TYPES:
+            _, extra_args = EH_TYPES[eh_name]
+            diag_out = run(["--eh", eh_name] + extra_args + ["diagnose", host], target_file)
+            verdict, hop = parse_diagnose(diag_out)
+            r["diagnose"][eh_name] = verdict
+            if hop:
+                r["diag_hop"][eh_name] = hop
 
         print()
         all_results.append(r)

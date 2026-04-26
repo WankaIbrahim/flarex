@@ -38,7 +38,7 @@ F = EHName.frag
 def mk_cfg(chain, *, auto_order=False):
     return CommonConfig(
         hop_limit=None, src=None, flowlabel=None, payload_size=None,
-        timeout=None, wait=None, quiet=False, verbose=False, json=False,
+        timeout=None,
         eh_auto_order=auto_order, eh_strict=False,
         eh_chain=chain, transport=None,
     )
@@ -61,7 +61,6 @@ def build(chain, *, auto_order=False) -> list[str]:
     (H, HBH),
     (B, HBH),
     (D, DST),
-    (R, RT),
     (F, FRG),
 ])
 def test_single_eh(eh, expected):
@@ -72,46 +71,33 @@ def test_single_eh(eh, expected):
 
 @pytest.mark.parametrize("chain,expected", [
     ([H, D], [HBH, DST]),
-    ([H, R], [HBH, RT]),
     ([H, F], [HBH, FRG]),
-    ([D, R], [DST, RT]),
     ([D, F], [DST, FRG]),
-    ([R, F], [RT,  FRG]),
 ])
 def test_pair_rfc_order_preserved(chain, expected):
     assert build(chain) == expected
 
 
 # 2-EH pairs — reversed order — WITHOUT auto_order the wrong order is kept
-# (confirms no silent RFC sorting unless --eh-auto-order is set)
 
 @pytest.mark.parametrize("chain,expected", [
     ([D, H], [DST, HBH]),
-    ([R, H], [RT,  HBH]),
     ([F, H], [FRG, HBH]),
-    ([R, D], [RT,  DST]),
     ([F, D], [FRG, DST]),
-    ([F, R], [FRG, RT]),
 ])
 def test_pair_wrong_order_preserved_without_auto_order(chain, expected):
     assert build(chain, auto_order=False) == expected
 
 
-# 2-EH pairs — auto_order — ALL 12 permutations produce RFC order
+# 2-EH pairs — auto_order — all supported permutations produce RFC order
 
 @pytest.mark.parametrize("chain,expected", [
     ([H, D], [HBH, DST]),
     ([D, H], [HBH, DST]),
-    ([H, R], [HBH, RT]),
-    ([R, H], [HBH, RT]),
     ([H, F], [HBH, FRG]),
     ([F, H], [HBH, FRG]),
-    ([D, R], [DST, RT]),
-    ([R, D], [DST, RT]),
     ([D, F], [DST, FRG]),
     ([F, D], [DST, FRG]),
-    ([R, F], [RT,  FRG]),
-    ([F, R], [RT,  FRG]),
 ])
 def test_pair_auto_order_all_permutations(chain, expected):
     assert build(chain, auto_order=True) == expected
@@ -120,26 +106,15 @@ def test_pair_auto_order_all_permutations(chain, expected):
 # 3-EH triples — RFC order — layers present AND in correct position
 
 @pytest.mark.parametrize("chain,expected", [
-    ([H, D, R], [HBH, DST, RT]),
     ([H, D, F], [HBH, DST, FRG]),
-    ([H, R, F], [HBH, RT,  FRG]),
-    ([D, R, F], [DST, RT,  FRG]),
 ])
 def test_triple_rfc_order_preserved(chain, expected):
     assert build(chain) == expected
 
 
-# 3-EH triples — auto_order — all 24 permutations (6 per canonical triple)
+# 3-EH triples — auto_order — all permutations of the supported triple
 
 @pytest.mark.parametrize("chain,expected", [
-    # hop + dst + rt  (6 permutations)
-    ([H, D, R], [HBH, DST, RT]),
-    ([H, R, D], [HBH, DST, RT]),
-    ([D, H, R], [HBH, DST, RT]),
-    ([D, R, H], [HBH, DST, RT]),
-    ([R, H, D], [HBH, DST, RT]),
-    ([R, D, H], [HBH, DST, RT]),
-
     # hop + dst + frag  (6 permutations)
     ([H, D, F], [HBH, DST, FRG]),
     ([H, F, D], [HBH, DST, FRG]),
@@ -147,22 +122,6 @@ def test_triple_rfc_order_preserved(chain, expected):
     ([D, F, H], [HBH, DST, FRG]),
     ([F, H, D], [HBH, DST, FRG]),
     ([F, D, H], [HBH, DST, FRG]),
-
-    # hop + rt + frag  (6 permutations)
-    ([H, R, F], [HBH, RT, FRG]),
-    ([H, F, R], [HBH, RT, FRG]),
-    ([R, H, F], [HBH, RT, FRG]),
-    ([R, F, H], [HBH, RT, FRG]),
-    ([F, H, R], [HBH, RT, FRG]),
-    ([F, R, H], [HBH, RT, FRG]),
-
-    # dst + rt + frag  (6 permutations)
-    ([D, R, F], [DST, RT, FRG]),
-    ([D, F, R], [DST, RT, FRG]),
-    ([R, D, F], [DST, RT, FRG]),
-    ([R, F, D], [DST, RT, FRG]),
-    ([F, D, R], [DST, RT, FRG]),
-    ([F, R, D], [DST, RT, FRG]),
 ])
 def test_triple_auto_order_all_permutations(chain, expected):
     assert build(chain, auto_order=True) == expected
@@ -172,21 +131,18 @@ def test_triple_auto_order_all_permutations(chain, expected):
 
 @pytest.mark.parametrize("chain,expected", [
     ([B, D],    [HBH, DST]),
-    ([B, R],    [HBH, RT]),
     ([B, F],    [HBH, FRG]),
-    ([D, B],    [DST, HBH]),   # reversed, no auto_order
-    ([B, D, R], [HBH, DST, RT]),
-    ([B, R, F], [HBH, RT,  FRG]),
-    ([D, B, F], [DST, HBH, FRG]),  # reversed, no auto_order
+    ([D, B],    [DST, HBH]),
+    ([B, D, F], [HBH, DST, FRG]),
+    ([D, B, F], [DST, HBH, FRG]),
 ])
 def test_hbh_alias_in_chains(chain, expected):
     assert build(chain) == expected
 
 @pytest.mark.parametrize("chain,expected", [
-    ([B, D],    [HBH, DST]),   # already RFC order
-    ([D, B],    [HBH, DST]),   # auto_order corrects
-    ([F, B, R], [HBH, RT, FRG]),
-    ([R, D, B], [HBH, DST, RT]),
+    ([B, D],    [HBH, DST]),
+    ([D, B],    [HBH, DST]),
+    ([F, B, D], [HBH, DST, FRG]),
 ])
 def test_hbh_alias_auto_order(chain, expected):
     assert build(chain, auto_order=True) == expected
@@ -194,7 +150,7 @@ def test_hbh_alias_auto_order(chain, expected):
 
 # Unsupported EHs raise in every chain position
 
-UNSUPPORTED = [EHName.ah, EHName.esp, EHName.mobility]
+UNSUPPORTED = [EHName.rt, EHName.ah, EHName.esp, EHName.mobility]
 
 @pytest.mark.parametrize("eh", UNSUPPORTED)
 def test_unsupported_single_raises(eh):
@@ -229,7 +185,7 @@ def test_unsupported_eh_in_triple_raises(chain):
 # Chain length boundary
 
 def test_chain_of_3_is_accepted():
-    result = build([H, D, R])
+    result = build([H, D, F])
     assert len(result) == 3
 
 def test_chain_of_4_raises():

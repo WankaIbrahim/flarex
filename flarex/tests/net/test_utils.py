@@ -18,7 +18,6 @@ from scapy.layers.inet6 import (
     ICMPv6EchoRequest,
     IPv6ExtHdrHopByHop,
     IPv6ExtHdrDestOpt,
-    IPv6ExtHdrRouting,
     IPv6ExtHdrFragment,
 )
 from scapy.layers.dns import DNS
@@ -42,10 +41,6 @@ def mk_cfg(
         flowlabel=flowlabel,
         payload_size=payload_size,
         timeout=None,
-        wait=None,
-        quiet=False,
-        verbose=False,
-        json=False,
         eh_auto_order=eh_auto_order,
         eh_strict=eh_strict,
         eh_chain=eh_chain,
@@ -135,18 +130,18 @@ def test_apply_eh_chain_dst():
     assert pkt.haslayer(IPv6ExtHdrDestOpt)
 
 def test_apply_eh_chain_rt():
-    pkt = apply_eh_chain(mk_cfg(eh_chain=[EHName.rt]), IPv6(dst="::1"))
-    assert pkt.haslayer(IPv6ExtHdrRouting)
+    with pytest.raises(ValueError, match="not implemented"):
+        apply_eh_chain(mk_cfg(eh_chain=[EHName.rt]), IPv6(dst="::1"))
 
 def test_apply_eh_chain_frag():
     pkt = apply_eh_chain(mk_cfg(eh_chain=[EHName.frag]), IPv6(dst="::1"))
     assert pkt.haslayer(IPv6ExtHdrFragment)
 
 def test_apply_eh_chain_multiple_layers_all_present():
-    pkt = apply_eh_chain(mk_cfg(eh_chain=[EHName.hop, EHName.dst, EHName.rt]), IPv6(dst="::1"))
+    pkt = apply_eh_chain(mk_cfg(eh_chain=[EHName.hop, EHName.dst, EHName.frag]), IPv6(dst="::1"))
     assert pkt.haslayer(IPv6ExtHdrHopByHop)
     assert pkt.haslayer(IPv6ExtHdrDestOpt)
-    assert pkt.haslayer(IPv6ExtHdrRouting)
+    assert pkt.haslayer(IPv6ExtHdrFragment)
 
 def test_apply_eh_chain_too_many_raises():
     with pytest.raises(ValueError, match="Cannot chain more than 3"):
@@ -249,29 +244,29 @@ def test_transport_defaults_to_icmp_when_none():
 # interpret_reply
 
 def test_interpret_reply_none_is_timeout():
-    assert interpret_reply(Transport.icmp, None) == "timeout"
+    assert interpret_reply(None) == "timeout"
 
 def test_interpret_reply_echo_reply():
-    assert interpret_reply(Transport.icmp, _FakePkt("ICMPv6EchoReply")) == "icmp_reply" # type: ignore
+    assert interpret_reply(_FakePkt("ICMPv6EchoReply")) == "icmp_reply" # type: ignore
 
 def test_interpret_reply_time_exceeded():
-    assert interpret_reply(Transport.udp, _FakePkt("ICMPv6TimeExceeded")) == "icmp_time_exceeded" # type: ignore
+    assert interpret_reply(_FakePkt("ICMPv6TimeExceeded")) == "icmp_time_exceeded" # type: ignore
 
 def test_interpret_reply_dest_unreach():
-    assert interpret_reply(Transport.udp, _FakePkt("ICMPv6DestUnreach")) == "icmp_dest_unreach" # type: ignore
+    assert interpret_reply(_FakePkt("ICMPv6DestUnreach")) == "icmp_dest_unreach" # type: ignore
 
 def test_interpret_reply_tcp():
-    assert interpret_reply(Transport.tcp, _FakePkt("TCP")) == "tcp_reply" # type: ignore
+    assert interpret_reply(_FakePkt("TCP")) == "tcp_reply" # type: ignore
 
 def test_interpret_reply_udp():
-    assert interpret_reply(Transport.udp, _FakePkt("UDP")) == "udp_reply" # type: ignore
+    assert interpret_reply(_FakePkt("UDP")) == "udp_reply" # type: ignore
 
 def test_interpret_reply_unknown():
-    assert interpret_reply(Transport.udp, _FakePkt("SomeOtherLayer")) == "unknown_reply" # type: ignore
+    assert interpret_reply(_FakePkt("SomeOtherLayer")) == "unknown_reply" # type: ignore
 
 def test_interpret_reply_echo_reply_takes_priority_over_time_exceeded():
     pkt = _FakePkt("ICMPv6EchoReply", "ICMPv6TimeExceeded")
-    assert interpret_reply(Transport.icmp, pkt) == "icmp_reply" # type: ignore
+    assert interpret_reply(pkt) == "icmp_reply" # type: ignore
 
 
 # resolve_address

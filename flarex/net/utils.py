@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 import socket
 import time
 from typing import Any, Optional, List, Dict
@@ -14,7 +15,6 @@ from scapy.layers.inet6 import (
     ICMPv6EchoRequest,
     IPv6ExtHdrHopByHop,
     IPv6ExtHdrDestOpt,
-    IPv6ExtHdrRouting,
     IPv6ExtHdrFragment,
     ICMPv6DestUnreach,
     ICMPv6TimeExceeded,
@@ -22,18 +22,24 @@ from scapy.layers.inet6 import (
     ICMPv6PacketTooBig,
 )
 
-def _build_payload(cfg: CommonConfig, default: bytes | None = None) -> bytes:
+def _build_payload(cfg: CommonConfig, default: bytes | None = None, force_payload: bytes | None = None,) -> bytes:
     """
     Build a payload bytes object.
 
+    If force_payload is not None, return that many bytes.
     If cfg.payload_size is set, returns that many bytes.
     Otherwise, returns "default" if provided.
     If neither is set, returns b"".
 
-    
+    Args:
+        cfg: Common configuration options shared across commands.
+        default: The default payload for the packet being constructed.
+        force_payload: An overriding payload passed through when PMTUD is activated.
     Raises:
         ValueError: If payload_size is negative.
     """
+    if force_payload is not None:
+        return force_payload
     n = getattr(cfg, "payload_size", None)
 
     if n is not None:
@@ -56,12 +62,11 @@ def now_ms() -> float:
     """
     return time.perf_counter() * 1000.0
 
-def interpret_reply(t: Transport, reply: Optional[Packet]):
+def interpret_reply(reply: Optional[Packet]):
     """
     Looks through a packets layers to determine what the packet is responding to
     
     Args:
-        t: The transport protocol used
         reply: The packet to be interpreted
         
     Returns:
@@ -114,11 +119,17 @@ def send_packet(pkt, *, target, transport, timeout, is_traceroute: bool = False,
         reply and ``rtt_ms`` is the round-trip time in milliseconds. Returns
         ``(None, None)`` if no reply arrives within ``timeout``.
     """
-    icmp_filter = "icmp6" if is_traceroute else f"icmp6 and ip6 src {target}"
+    if is_traceroute:
+        icmp_filter = (
+            f"(icmp6 and ip6[40] == 3) or "
+            f"(icmp6 and ip6 src {target} and (ip6[40] == 1 or ip6[40] == 129))"
+        )
+    else:
+        icmp_filter = f"icmp6 and ip6 src {target}"
 
     if transport == Transport.icmp:
         if is_traceroute:
-            filter = f"(icmp6 and ip6 src {target} and ip6[40] == 129) or (icmp6 and ip6[40] == 3)"
+            filter = icmp_filter
         else:
             filter = f"icmp6 and ip6 src {target} and ip6[40] == 129"
 
@@ -204,10 +215,10 @@ def apply_eh_chain(cfg: CommonConfig, pkt: Any):
     Supported EHs
     - Hop-by-hop options (hop, hbh)
     - Destination options (dst)
-    - Routing (rt)
     - Fragmentation (frag)
     
     Unsupported EHs
+    - Routing (rt)
     - Authentication (ah)
     - Encapsulating Security Payload (esp)
     - Mobility (mobility)
@@ -224,6 +235,7 @@ def apply_eh_chain(cfg: CommonConfig, pkt: Any):
         ValueError: If more than 3 extension headers are chained together or
             if conflicting flags are provided or if an EH is not implemented
     """
+    
     if cfg.eh_chain is None:
         return pkt
     
@@ -256,11 +268,9 @@ def apply_eh_chain(cfg: CommonConfig, pkt: Any):
             pkt = pkt / IPv6ExtHdrHopByHop()
         elif eh == EHName.dst:
             pkt = pkt / IPv6ExtHdrDestOpt()
-        elif eh == EHName.rt:
-            pkt = pkt / IPv6ExtHdrRouting()
         elif eh == EHName.frag:
             pkt = pkt / IPv6ExtHdrFragment()
-        elif eh in (EHName.ah, EHName.esp, EHName.mobility):
+        elif eh in (EHName.rt, EHName.ah, EHName.esp, EHName.mobility):
             raise ValueError(f"Extension header '{eh.value}' is not implemented yet.")
         else:
             raise ValueError(f"Unexpected EH value: {eh!r}")
@@ -296,7 +306,7 @@ def apply_transport_layer(
         tcp_flags: TCP flags string for TCP probes.
         force_payload: If provided, used as the exact payload bytes, bypassing
             both ``payload`` and ``cfg.payload_size``. Used by PMTUD to enforce
-            a specific probe size regardless of user-supplied payload settings.
+            a specific probe size.
 
     Returns:
         Packet with transport layer attached.
@@ -304,11 +314,9 @@ def apply_transport_layer(
     Raises:
         ValueError: For unsupported or unhandled transports.
     """
-    data = force_payload if force_payload is not None else _build_payload(cfg, default=payload)
+    data = _build_payload(cfg, payload, force_payload)
     
-    t = transport if transport is not None else cfg.transport
-    if t is None:
-        t = Transport.icmp
+    t = transport if transport is not None else cfg.transport if cfg.transport is not None else Transport.icmp
 
     if t == Transport.icmp:
         layer = ICMPv6EchoRequest()
@@ -326,27 +334,27 @@ def apply_transport_layer(
 
         qname = dest.value
         dns_payload = DNS(rd=1, qd=DNSQR(qname=qname, qtype="AAAA"))
-        return pkt / UDP(dport=53) / dns_payload
+        return pkt / UDP(sport=random.randint(32768, 60999), dport=53) / dns_payload
 
     if t == Transport.udp:
-        pkt = pkt / UDP(dport=33434)
+        pkt = pkt / UDP(sport=random.randint(32768, 60999), dport=33434)
         return (pkt / Raw(load=data)) if data else pkt
 
     if t == Transport.tcp:
-        pkt = pkt / TCP(dport=443, flags=tcp_flags)
-        return (pkt / Raw(load=data)) if data else pkt
+        pkt = pkt / TCP(sport=random.randint(32768, 60999), dport=443, flags=tcp_flags)
+        return pkt
 
     if t == Transport.ssh:
-        pkt = pkt / TCP(dport=22, flags=tcp_flags)
-        return (pkt / Raw(load=data)) if data else pkt
+        pkt = pkt / TCP(sport=random.randint(32768, 60999), dport=22, flags=tcp_flags)
+        return pkt
 
     if t == Transport.http:
-        pkt = pkt / TCP(dport=80, flags=tcp_flags)
-        return (pkt / Raw(load=data)) if data else pkt
+        pkt = pkt / TCP(sport=random.randint(32768, 60999), dport=80, flags=tcp_flags)
+        return pkt
 
     if t == Transport.https:
-        pkt = pkt / TCP(dport=443, flags=tcp_flags)
-        return (pkt / Raw(load=data)) if data else pkt
+        pkt = pkt / TCP(sport=random.randint(32768, 60999), dport=443, flags=tcp_flags)
+        return pkt
 
     raise RuntimeError(f"Unhandled transport enum: {t!r}")
     

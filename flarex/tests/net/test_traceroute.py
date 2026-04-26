@@ -28,10 +28,6 @@ def mk_cfg(
         flowlabel=flowlabel,
         payload_size=payload_size,
         timeout=timeout,
-        wait=None,
-        quiet=False,
-        verbose=False,
-        json=False,
         eh_auto_order=eh_auto_order,
         eh_strict=eh_strict,
         eh_chain=eh_chain,
@@ -231,7 +227,7 @@ def test_wait_probe_sleep_called_between_probes(monkeypatch):
     calls = []
     monkeypatch.setattr(tr.time, "sleep", lambda t: calls.append(t))
     list(tr.traceroute(mk_cfg(), DEST, max_hop=1, probes=3, wait_probe=0.2))
-    assert len(calls) == 2  # N-1 sleeps within a single hop
+    assert len(calls) == 2
     assert all(t == 0.2 for t in calls)
 
 def test_no_dns_overrides_dns_transport(monkeypatch):

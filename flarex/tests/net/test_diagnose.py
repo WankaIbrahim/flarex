@@ -31,10 +31,6 @@ def mk_cfg(
         flowlabel=flowlabel,
         payload_size=payload_size,
         timeout=timeout,
-        wait=None,
-        quiet=False,
-        verbose=False,
-        json=False,
         eh_auto_order=eh_auto_order,
         eh_strict=eh_strict,
         eh_chain=eh_chain,
@@ -57,7 +53,6 @@ def _ping_events(received: int = 4) -> list:
         "max_ms": 1.0,
     })
     return events
-
 
 def _trace_events(hops: list) -> list:
     """Return a minimal traceroute event stream for the given list of hop IPs."""
@@ -221,7 +216,7 @@ def test_diagnose_default_transport_is_icmp(monkeypatch):
 
 def test_diagnose_transport_override_reflected_in_start(monkeypatch):
     _mock_network(monkeypatch, ping_received=4)
-    start = list(diagnose.diagnose(mk_cfg(), DEST, transport=Transport.udp))[0]
+    start = list(diagnose.diagnose(mk_cfg(transport=Transport.udp), DEST))[0]
     assert start["transport"] == Transport.udp.value
 
 def test_diagnose_ends_with_done_when_loss(monkeypatch):

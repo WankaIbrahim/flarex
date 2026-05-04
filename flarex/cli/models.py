@@ -41,7 +41,6 @@ class CommonConfig:
     payload_size: Optional[int] = None
     timeout: Optional[float] = None
     eh_auto_order: bool = False
-    eh_strict: bool = False
     eh_chain: Optional[List[EHName]] = None
     transport: Optional[Transport] = None
     

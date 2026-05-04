@@ -179,5 +179,6 @@ pyrightconfig.json
 
 syntax.xhtml
 
-# script.py results
-script/results/results_*/
+#results
+script_1/results/*
+script_2/results/*

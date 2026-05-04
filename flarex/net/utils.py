@@ -245,9 +245,6 @@ def apply_eh_chain(cfg: CommonConfig, pkt: Any):
     if len(cfg.eh_chain) > 3:
         raise ValueError("Cannot chain more than 3 extension headers together")
 
-    if cfg.eh_auto_order and cfg.eh_strict:
-        raise ValueError("Cannot use --eh-auto-order and --eh-strict together.")
-
     chain: List[EHName] = list(cfg.eh_chain)
     
     if cfg.eh_auto_order:

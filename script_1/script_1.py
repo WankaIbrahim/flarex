@@ -4,9 +4,9 @@ script.py
 Usage: sudo python3 script.py [output_dir]
 
 Phases per target:
-  1. Baseline  — plain ping to host using icmpv6
-  2. EH probes — ping followed by trace for each of: hbh (HBH8), frag (FH512), dst (DO8)
-  3. Diagnose  — flarex diagnose per EH
+  1. Baseline  - plain ping to host using icmpv6
+  2. EH probes - ping followed by trace for each of: hbh (HBH8), frag (FH512), dst (DO8)
+  3. Diagnose  - flarex diagnose per EH
 """
 
 import csv
@@ -18,7 +18,7 @@ import datetime
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-CSV_FILE = HERE / "targets_100.csv"
+CSV_FILE = HERE / "targets_1000.csv"
 FLAREX = HERE.parent / ".venv/bin/flarex"
 
 EH_TYPES = {
@@ -77,7 +77,7 @@ def parse_diagnose(output):
         return "N/A", None
     if "no packet loss detected" in output:
         return "CLEAN", None
-    m = re.search(r"filtering hop identified\s+[—-]\s+(\S+)", output)
+    m = re.search(r"filtering hop identified\s+[--]\s+(\S+)", output)
     if m:
         return "FILT", m.group(1)
     if "no filtering hop identified" in output:
@@ -92,8 +92,6 @@ def parse_csv(path):
                 continue
             idx = row[0].strip()
             host = row[1].strip()
-            if idx.startswith("#"):
-                continue
             targets.append((idx, host))
     return targets
 
@@ -114,7 +112,7 @@ def write_summary(results, out_dir):
     lines = []
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     lines.append(sep)
-    lines.append(f" flarex EH probe report — {now}")
+    lines.append(f" flarex EH probe report - {now}")
     lines.append(sep)
     lines.append(header_fmt.format("", "", "", "HBH", "FRAG", "DST"))
     lines.append(col_fmt.format("IDX", "HOST", "BASE",
@@ -133,14 +131,10 @@ def write_summary(results, out_dir):
     lines.append(dash)
 
 
-    eligible = []
-    for r in results:
-        b = r["baseline_loss"]
-        if b is not None and b < 100.0:
-            eligible.append(r)
+    eligible = [r for r in results if r["baseline_loss"] is not None]
     skipped = len(results) - len(eligible)
 
-    lines.append(f" aggregate over {len(eligible)} host(s) with passing baseline"
+    lines.append(f" aggregate over {len(eligible)} host(s) with valid baseline"
                  f" (excluded {skipped}):")
     for eh in EH_TYPES:
         losses = []
@@ -194,7 +188,7 @@ def main():
         sys.exit(f"Error: {CSV_FILE} not found.")
 
     stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_dir = Path(f"results/results_{stamp}")
+    out_dir = HERE / "results" / f"results_{stamp}"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     targets = parse_csv(CSV_FILE)

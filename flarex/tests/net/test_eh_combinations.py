@@ -39,7 +39,7 @@ def mk_cfg(chain, *, auto_order=False):
     return CommonConfig(
         hop_limit=None, src=None, flowlabel=None, payload_size=None,
         timeout=None,
-        eh_auto_order=auto_order, eh_strict=False,
+        eh_auto_order=auto_order,
         eh_chain=chain, transport=None,
     )
 
@@ -55,7 +55,7 @@ def build(chain, *, auto_order=False) -> list[str]:
     return layer_order(apply_eh_chain(mk_cfg(chain, auto_order=auto_order), IPv6(dst="::1")))
 
 
-# Singles — each EH type produces exactly one layer
+# Singles - each EH type produces exactly one layer
 
 @pytest.mark.parametrize("eh,expected", [
     (H, HBH),
@@ -67,7 +67,7 @@ def test_single_eh(eh, expected):
     assert build([eh]) == [expected]
 
 
-# 2-EH pairs — RFC order — layers present AND in correct position
+# 2-EH pairs - RFC order - layers present AND in correct position
 
 @pytest.mark.parametrize("chain,expected", [
     ([H, D], [HBH, DST]),
@@ -78,7 +78,7 @@ def test_pair_rfc_order_preserved(chain, expected):
     assert build(chain) == expected
 
 
-# 2-EH pairs — reversed order — WITHOUT auto_order the wrong order is kept
+# 2-EH pairs - reversed order - WITHOUT auto_order the wrong order is kept
 
 @pytest.mark.parametrize("chain,expected", [
     ([D, H], [DST, HBH]),
@@ -89,7 +89,7 @@ def test_pair_wrong_order_preserved_without_auto_order(chain, expected):
     assert build(chain, auto_order=False) == expected
 
 
-# 2-EH pairs — auto_order — all supported permutations produce RFC order
+# 2-EH pairs - auto_order - all supported permutations produce RFC order
 
 @pytest.mark.parametrize("chain,expected", [
     ([H, D], [HBH, DST]),
@@ -103,7 +103,7 @@ def test_pair_auto_order_all_permutations(chain, expected):
     assert build(chain, auto_order=True) == expected
 
 
-# 3-EH triples — RFC order — layers present AND in correct position
+# 3-EH triples - RFC order - layers present AND in correct position
 
 @pytest.mark.parametrize("chain,expected", [
     ([H, D, F], [HBH, DST, FRG]),
@@ -112,7 +112,7 @@ def test_triple_rfc_order_preserved(chain, expected):
     assert build(chain) == expected
 
 
-# 3-EH triples — auto_order — all permutations of the supported triple
+# 3-EH triples - auto_order - all permutations of the supported triple
 
 @pytest.mark.parametrize("chain,expected", [
     # hop + dst + frag  (6 permutations)

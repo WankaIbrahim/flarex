@@ -30,7 +30,6 @@ def mk_cfg(
     transport=None,
     eh_chain=None,
     eh_auto_order=False,
-    eh_strict=False,
     src=None,
     hop_limit=None,
     flowlabel=None,
@@ -42,7 +41,6 @@ def mk_cfg(
         payload_size=payload_size,
         timeout=None,
         eh_auto_order=eh_auto_order,
-        eh_strict=eh_strict,
         eh_chain=eh_chain,
         transport=transport,
     )
@@ -153,13 +151,6 @@ def test_apply_eh_chain_too_many_raises():
 def test_apply_eh_chain_unsupported_raises():
     with pytest.raises(ValueError, match="not implemented"):
         apply_eh_chain(mk_cfg(eh_chain=[EHName.ah]), IPv6(dst="::1"))
-
-def test_apply_eh_chain_auto_order_and_strict_raises():
-    with pytest.raises(ValueError):
-        apply_eh_chain(
-            mk_cfg(eh_chain=[EHName.hop], eh_auto_order=True, eh_strict=True),
-            IPv6(dst="::1"),
-        )
 
 def test_apply_eh_chain_auto_order_sorts_hop_before_dst():
     pkt = apply_eh_chain(

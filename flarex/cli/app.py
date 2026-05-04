@@ -23,7 +23,6 @@ def main(
     timeout: Optional[float] = typer.Option(None, "--timeout"),
     eh: Optional[str] = typer.Option(None, "--eh", help="EH chain like 'hop,dst' or 'none'"),
     eh_auto_order: bool = typer.Option(False, "--eh-auto-order"),
-    eh_strict: bool = typer.Option(False, "--eh-strict"),
     transport: Optional[Transport] = typer.Option(None, "-T", "--transport"),
 ):
     
@@ -35,7 +34,6 @@ def main(
         payload_size=payload_size,
         timeout=timeout,
         eh_auto_order=eh_auto_order,
-        eh_strict=eh_strict,
         eh_chain=parse_eh_spec(eh),
         transport=transport,
     )

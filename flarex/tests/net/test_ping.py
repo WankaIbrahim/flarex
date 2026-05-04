@@ -12,7 +12,6 @@ def mk_cfg(
     transport=None,
     eh_chain=None,
     eh_auto_order=False,
-    eh_strict=False,
     src=None,
     hop_limit=None,
     flowlabel=None,
@@ -25,7 +24,6 @@ def mk_cfg(
         payload_size=payload_size,
         timeout=timeout,
         eh_auto_order=eh_auto_order,
-        eh_strict=eh_strict,
         eh_chain=eh_chain,
         transport=transport,
     )

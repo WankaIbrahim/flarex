@@ -30,15 +30,15 @@ def diagnose(
 
     Runs in three phases:
 
-    1. **Ping** — sends a small burst of probes using the caller's config. If
+    1. Ping - sends a small burst of probes using the caller's config. If
        all packets are received the destination is reachable with no loss, a
        ``result`` event with ``filtered_hop=None`` is yielded and the generator
        exits early.
 
-    2. **Traceroute** — if ping detects loss, a clean traceroute (ICMP, no EH)
+    2. Traceroute - if ping detects loss, a clean traceroute (ICMP, no EH)
        is run to discover the path and populate the hop list.
 
-    3. **Locate** — the selected method probes individual TTLs to find the
+    3. Locate - the selected method probes individual TTLs to find the
        first hop that silently drops EH packets.
 
     Args:
@@ -177,7 +177,7 @@ def _hop_count(classified: List[tuple]) -> Dict[str, List[int]]:
     Each entry in ``classified`` pairs a hop IP address with a boolean
     indicating whether the test probe at that TTL was forwarded (``True``) or
     dropped (``False``). The resulting counts mirror the algorithm from
-    Huston et al. — for every TTL observation the responding router's
+    de Boer & Bosma. - for every TTL observation the responding router's
     unfiltered or filtered counter is incremented by one.
 
     Args:
@@ -203,7 +203,7 @@ def _find_filtering_hop(counts: Dict[str, List[int]]) -> Optional[str]:
     Identify the most likely filtering hop from hop-count data.
 
     First looks for a hop whose filtered count is non-zero and whose
-    unfiltered count is zero — a clean signal that the router consistently
+    unfiltered count is zero - a clean signal that the router consistently
     drops EH packets. If no such hop exists, falls back to the hop with the
     highest filtered ratio, provided it exceeds 0.5. Returns ``None`` when
     the evidence is insufficient to name a culprit.

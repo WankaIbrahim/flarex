@@ -1,11 +1,23 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "flarex"
 version = "0.1.0"
+description = "IPv6 diagnostic CLI for analyzing extension-header filtering on the path."
+readme = "README.md"
+license = { file = "LICENSE" }
 requires-python = ">=3.10"
-dependencies = ["typer", "scapy", "rich", "pydantic"]
+authors = [{ name = "Ibrahim Wanka" }]
+dependencies = [
+    "typer>=0.9",
+    "scapy>=2.5",
+]
 
 [project.scripts]
 flarex = "flarex.__main__:main"
 
-[tool.setuptools]
-packages = ["flarex"]
+[tool.setuptools.packages.find]
+include = ["flarex*"]
+exclude = ["flarex.tests*"]

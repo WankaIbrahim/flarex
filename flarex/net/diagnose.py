@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import time
 from dataclasses import replace
 from typing import Any, Dict, Iterator, List, Optional
@@ -60,7 +61,9 @@ def diagnose(
     method = method or DiagnoseMethod.confirm_last
     transport = cfg.transport or Transport.icmp
     timeout = float(cfg.timeout) if cfg.timeout is not None else 2.0
-    ident = int(time.time()) & 0xFFFF
+    if timeout <= 0:
+        raise ValueError("--timeout must be > 0")
+    ident = (os.getpid() ^ int(time.time())) & 0xFFFF
 
     target = resolve_address(dest)
 

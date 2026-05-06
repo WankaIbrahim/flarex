@@ -61,13 +61,12 @@ def render_ping_stream(event: Dict[str, Any]) -> None:
         received = event.get("received")
         pkt_loss = event.get("pkt_loss")
         total_time = event.get("total_time")
-        min = event.get("min_ms")
-        avg = event.get("avg_ms")
-        max = event.get("max_ms")
-        
+        min_ms = event.get("min_ms")
+        avg_ms = event.get("avg_ms")
+        max_ms = event.get("max_ms")
         print(f"\n--- {raw} ping statistics ---")
         print(f"{sent} packets transmitted, {received} received, {pkt_loss}% packet loss, time {total_time}ms")
-        print(f"rtt min/avg/max = {min}/{avg}/{max} ms")
+        print(f"rtt min/avg/max = {min_ms}/{avg_ms}/{max_ms} ms")
 
 def render_traceroute(event: Dict[str, Any]) -> None:
     et = event.get("type")

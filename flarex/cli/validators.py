@@ -25,6 +25,9 @@ def parse_destination(dest: str) -> Destination:
     """
     s = dest.strip()
 
+    if not s:
+        raise ValueError("Destination cannot be empty.")
+
     if s.startswith("[") and s.endswith("]"):
         inner = s[1:-1].strip()
         return Destination(raw=dest, kind="ipv6", value=str(ipaddress.IPv6Address(inner)))
@@ -34,8 +37,6 @@ def parse_destination(dest: str) -> Destination:
     except ValueError:
         pass
 
-    if not s:
-        raise ValueError("Destination cannot be empty.")
     return Destination(raw=dest, kind="hostname", value=s)
 
 def parse_eh_spec(spec: Optional[str]) -> Optional[List[EHName]]:

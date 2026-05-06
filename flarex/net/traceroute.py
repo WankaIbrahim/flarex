@@ -1,11 +1,32 @@
 from __future__ import annotations
 
+import os
+import socket
 import time
 from typing import Optional, Iterator, Dict, Any
 
+from scapy.layers.inet6 import IPv6
+
 from flarex.cli.models import CommonConfig, Destination, Transport
-from flarex.net.utils import *
-from flarex.cli.validators import parse_destination
+from flarex.net.utils import (
+    apply_eh_chain,
+    apply_transport_layer,
+    build_ipv6_base,
+    interpret_reply,
+    resolve_address,
+    send_packet,
+)
+
+
+def _reverse_lookup(ip: str) -> str:
+    """
+    Best-effort reverse DNS lookup. Returns the input IP on failure.
+    """
+    try:
+        return socket.gethostbyaddr(ip)[0]
+    except (socket.herror, socket.gaierror, OSError):
+        return ip
+
 
 def traceroute(
     cfg: CommonConfig,
@@ -36,8 +57,8 @@ def traceroute(
             Defaults to 0.
         loop_threshold: Number of consecutive repeated source addresses
             before a routing loop is declared. Defaults to 3.
-        no_dns: If ``True``, suppresses DNS resolution of hop addresses and
-            overrides the ``dns`` transport with ``udp``.
+        no_dns: If ``True``, suppresses reverse-DNS resolution of hop
+            addresses and overrides the ``dns`` transport with ``udp``.
 
     Yields:
         Dictionaries describing traceroute events with ``type`` values of
@@ -69,7 +90,7 @@ def traceroute(
         raise ValueError("--timeout must be > 0")
     
     transport = cfg.transport or Transport.udp
-    if no_dns == True and transport == Transport.dns:
+    if no_dns and transport == Transport.dns:
         transport = Transport.udp
     
     target = resolve_address(dest)
@@ -87,8 +108,8 @@ def traceroute(
         "eh_chain": [getattr(e, "value", str(e)) for e in (cfg.eh_chain or [])] if cfg.eh_chain is not None else None,
         "loop_threshold": loop_threshold,
     }
-    
-    ident = int(time.time()) & 0xFFFF
+
+    ident = (os.getpid() ^ int(time.time())) & 0xFFFF
     reached = False
     loop_detected = False
     seen_sources: dict[str, int] = {}
@@ -132,10 +153,9 @@ def traceroute(
                 time.sleep(wait_probe)
 
         if hop_source is not None:
-            parsed_source = parse_destination(hop_source)
-            resolved_source = resolve_address(parsed_source) if not no_dns else hop_source
+            resolved_source = hop_source if no_dns else _reverse_lookup(hop_source)
             source_info = {
-                "raw": parsed_source.raw,
+                "raw": hop_source,
                 "resolved": resolved_source,
             }
         else:

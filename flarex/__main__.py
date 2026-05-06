@@ -36,6 +36,12 @@ def main() -> None:
     except PermissionError as e:
         print(f"flarex: permission denied ({e})", file=sys.stderr)
         sys.exit(2)
+    except RuntimeError as e:
+        print(f"flarex: {e}", file=sys.stderr)
+        sys.exit(2)
+    except OSError as e:
+        print(f"flarex: {e}", file=sys.stderr)
+        sys.exit(2)
 
 
 if __name__ == "__main__":

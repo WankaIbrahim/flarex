@@ -1,10 +1,25 @@
 from __future__ import annotations
 
+import os
 import time
 from typing import Optional, Iterator, Dict, Any
 
+from scapy.layers.inet6 import IPv6, ICMPv6PacketTooBig
+
 from flarex.cli.models import CommonConfig, Destination, Transport
-from flarex.net.utils import *
+from flarex.net.utils import (
+    apply_eh_chain,
+    apply_transport_layer,
+    build_ipv6_base,
+    interpret_reply,
+    now_ms,
+    resolve_address,
+    send_packet,
+)
+
+_TCP_FAMILY = (Transport.tcp, Transport.ssh, Transport.http, Transport.https)
+_RECEIVED_STATUSES = ("icmp_reply", "tcp_reply", "udp_reply")
+
 
 def ping(
     cfg: CommonConfig,
@@ -33,7 +48,9 @@ def ping(
         pmtud: When True, enables Path MTU Discovery. Probes are
             sized to ``pmtu_size`` and ICMPv6 Packet Too Big replies are
             captured. Each such reply reduces the probe size for subsequent
-            probes to the advertised MTU.
+            probes to the advertised MTU. Not supported with TCP-family
+            transports (tcp, ssh, http, https) since their probes are
+            payload-less SYNs.
         pmtu_size: Initial total probe packet size (IPv6 header + ICMPv6
             header + payload) when PMTUD is enabled. Defaults to 1500.
             Must be >= 1280 (IPv6 minimum MTU).
@@ -43,8 +60,9 @@ def ping(
         ``start``, ``probe``, and ``summary``.
 
     Raises:
-        ValueError: If count is less than 1, interval is negative, or the
-            effective timeout is not greater than 0.
+        ValueError: If count is less than 1, interval is negative, the
+            effective timeout is not greater than 0, or PMTUD is enabled
+            with an unsupported transport.
     """
     
     _DEFAULT_PAYLOAD = 56
@@ -70,9 +88,13 @@ def ping(
     
     if transport in (Transport.icmp, Transport.udp, Transport.dns):
         _TRANSPORT_HDR = 8
-    elif transport in (Transport.tcp, Transport.http, Transport.https, Transport.ssh):
+    elif transport in _TCP_FAMILY:
         _TRANSPORT_HDR = 20
-    
+    if pmtud and transport in _TCP_FAMILY:
+        raise ValueError(
+            f"--pmtud is not supported with transport '{transport.value}' "
+            "(TCP-family probes carry no resizable payload)"
+        )
     if pmtud:
         if pmtu_size is not None and pmtu_size < _MIN_MTU:
             raise ValueError(f"--pmtu-size must be >= {_MIN_MTU} (IPv6 minimum MTU)")
@@ -107,7 +129,7 @@ def ping(
         
     received = 0
     rtts = []
-    ident = int(time.time()) & 0xFFFF
+    ident = (os.getpid() ^ int(time.time())) & 0xFFFF
 
     total_start = now_ms()
     
@@ -126,8 +148,6 @@ def ping(
             tcp_flags="S",
             force_payload=force_payload,
         )
-        #TODO: Remove debug print statement
-        print(pkt)
         reply, rtt_ms = send_packet(pkt, target=target, transport=transport, timeout=timeout, pmtud=pmtud)
         reply_status = interpret_reply(reply)
 
@@ -142,7 +162,7 @@ def ping(
             if reply.haslayer(IPv6):
                 reply_src = reply[IPv6].src
 
-        if reply_status not in ("timeout", "icmp_packet_too_big") and reply is not None:
+        if reply_status in _RECEIVED_STATUSES and reply is not None:
             received += 1
             rtts.append(rtt_ms)
 
@@ -167,8 +187,8 @@ def ping(
     
     total_time = int(round(now_ms() - total_start))
     sent = count
-    pkt_loss = (1.0 - (received / sent)) * 100.0 if sent else 0
-    
+    pkt_loss = (1.0 - (received / sent)) * 100.0
+
     yield {
         "type": "summary",
         "destination": {

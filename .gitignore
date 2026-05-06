@@ -177,8 +177,6 @@ pyrightconfig.json
 
 # End of https://www.toptal.com/developers/gitignore/api/python
 
-syntax.xhtml
-
 #results
 script_1/results/*
 script_2/results/*

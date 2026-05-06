@@ -69,7 +69,7 @@ def _mock_network(monkeypatch, *, target=TARGET, reply_fn=None):
     monkeypatch.setattr(tr, "build_ipv6_base", lambda cfg, dest, **kw: object())
     monkeypatch.setattr(tr, "apply_eh_chain", lambda cfg, pkt: pkt)
     monkeypatch.setattr(tr, "apply_transport_layer", lambda cfg, pkt, **kw: pkt)
-    monkeypatch.setattr(tr, "parse_destination", lambda s: Destination(s, "ipv6", s))
+    monkeypatch.setattr(tr, "_reverse_lookup", lambda ip: ip)
     monkeypatch.setattr(tr.time, "sleep", lambda *_: None)
 
     if reply_fn is not None:

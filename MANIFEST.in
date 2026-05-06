@@ -1,0 +1,9 @@
+prune script_1
+prune script_2
+prune build
+prune dist
+prune .venv
+prune .pytest_cache
+prune flarex.egg-info
+prune flarex/tests
+exclude syntax.xhtml
